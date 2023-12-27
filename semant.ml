@@ -17,12 +17,24 @@ type transdecty = { venv : venv; tenv : tenv }
 
 let get_typ = function Some ty -> ty | None -> T.BOTTOM
 
+let from_symbol ty_name =
+  match ty_name with
+  | Types.NAME (name, typ_opt_ref) ->
+    (match name with
+     | S.{ name="int"; _ } -> Some (Types.INT)
+     | S.{ name="string"; _ } -> Some (Types.STRING)
+     | _ -> None)
+  | _ -> None
+
 let rec actual_ty ty ~pos =
   match ty with
   | Types.NAME (name, typ_opt_ref) ->
-    (match !typ_opt_ref with
-     | None -> failwith ("unkown type:" ^ (S.name name))
-     | Some ty -> actual_ty ty ~pos)
+    (match from_symbol ty with
+    | Some ty -> ty
+    | None ->
+      (match !typ_opt_ref with
+       | None -> failwith ("unkown type:" ^ (S.name name))
+       | Some ty -> actual_ty ty ~pos))
   | Types.UNIT
   | Types.NIL
   | Types.INT
