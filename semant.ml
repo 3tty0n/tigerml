@@ -148,7 +148,7 @@ let rec transExp venv tenv senv level exp =
       in
       let processed_args = checkParams formals args 1 [] in
       let _ = checkErr () in
-      return (Translate.callExp (label, processed_args, dec_level, level)) (actualTy result pos)
+      return (Translate.callExp (label, dec_level, level, processed_args)) (actualTy result pos)
 
     | A.OpExp {left; oper; right; pos} ->
       let op = quote (opStr oper) in

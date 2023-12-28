@@ -30,7 +30,7 @@ val ifThen : exp * exp -> exp
 val stringExp : string -> exp
 val recordExp : exp list -> exp
 val arrayExp : exp * exp -> exp
-val callExp : Temp.label * exp list * level * level -> exp
+val callExp : Temp.label * level * level * exp list  -> exp
 val whileExp : exp * exp * Temp.label -> exp
 val forExp : exp * exp * exp * exp * Temp.label -> exp
 val breakExp : Temp.label -> exp

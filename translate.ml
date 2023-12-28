@@ -27,6 +27,11 @@ let formals level =
 
 let static_link l = List.hd (Frame.formals l.frame)
 
+let levelEq a b =
+  let {unique=aunique; _} = a in
+  let {unique=bunique; _} = b in
+  aunique == bunique
+
 let allocLocal ({frame; _} as level) escapes =
   (level, Frame.allocLocal frame escapes)
 
@@ -238,20 +243,39 @@ let forExp (counter, lo, hi, body, end_label) =
        ])
   )
 
-let findCallStaticLink (fn_level, call_level) =
-  let rec do_one_level curr_level frame_addr =
-    if fn_level.unique = curr_level.unique then
-      Frame.exp (static_link fn_level) frame_addr
+let computeDeclaringFrameAddress (decLevel, level) =
+  let rec findFrame currLevel currAddr =
+    let {parent; frame=currFrame; _} = currLevel in
+    if levelEq decLevel currLevel then
+      (* we are in the correct frame *)
+      currAddr
     else
-      match curr_level.parent with
-      | Some parent ->
-        do_one_level parent (Frame.exp (static_link curr_level) frame_addr)
-      | None -> ErrorMsg.impossible "Missing parent link"
-  in Ex (do_one_level call_level (T.TEMP Frame.fp))
+      (* the frame we want is further up the chain *)
+      let slAccess = match Frame.formals currFrame with
+        hd :: _ -> hd
+      | [] -> ErrorMsg.impossible "found a frame with no formals - there should always be at least one formal for the static link"
+      in
+      let parentAddr = Frame.exp slAccess currAddr in
+      let parentLevel = match parent with
+        Some level -> level
+      | None -> ErrorMsg.impossible "followed static links to the outermost level. this should never happen"
+      in
+      findFrame parentLevel parentAddr
+  in
+  findFrame level (T.TEMP Frame.fp)
 
-let callExp (name, args, fn_level, call_level) =
-  let call_args = findCallStaticLink (fn_level, call_level) :: args in
-  Ex (T.CALL (T.NAME name, List.map unEx call_args))
+let callExp (label, fun_level, call_level, args) =
+  let { parent; _ } : level = fun_level in
+  let unExArgs = List.map unEx args in
+  let parent_level = match parent with
+    | Some level -> level
+    | None -> ErrorMsg.impossible "called a function with no enclosing parent level"
+  in
+  let call =
+    let declaring_frame_addr =  computeDeclaringFrameAddress (parent_level, call_level) in
+    T.CALL (T.NAME label, declaring_frame_addr :: unExArgs)
+  in
+  Ex call
 
  (* Assume that stdlib functions do not require a static link *)
 let callStdlibExp (name, args) =

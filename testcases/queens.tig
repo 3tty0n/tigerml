@@ -10,14 +10,16 @@ let
     var diag1 := intArray [N+N-1] of 0
     var diag2 := intArray [N+N-1] of 0
 
+    function print(s:string) = ()
+
     function printboard() =
        (for i := 0 to N-1
-	 do (for j := 0 to N-1 
-	      do print(if col[i]=j then " O" else " .");
-	     print("\n"));
-         print("\n"))
+            do (for j := 0 to N-1
+                    do print(if col[i]=j then " O" else " .");
+                print("\n"));
+            print("\n"))
 
-    function try(c:int) = 
+    function try(c:int) =
 ( /*  for i:= 0 to c do print("."); print("\n"); flush();*/
      if c=N
      then printboard()
@@ -31,4 +33,4 @@ let
 )
  in try(0)
 end
-	
+
