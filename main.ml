@@ -1,5 +1,8 @@
 open Frame
 
+let canonize stm =
+  stm |> Canon.linearize |> Canon.basicBlocks |> Canon.traceSchedule
+
 let run filename =
   try
     let ast = Parse.parse filename in
