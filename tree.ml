@@ -37,7 +37,7 @@ and stm =
 [@@deriving show]
 
 and binop = PLUS | MINUS | MUL | DIV
-          | AND | OR | LSHIFT | RSHIPFT | XOR (* | ARSHIFT *)
+          | AND | OR | LSHIFT | RSHIFT | XOR (* | ARSHIFT *)
 [@@deriving show]
 
 and relop = EQ | NE | LT | GT | LE | GE (* | ULT | ULE | UGT | UGE *)

@@ -44,8 +44,8 @@ let printtree (outstream, s) =
     | T.OR -> "OR"
     | T.LSHIFT -> "LSHIFT"
     | T.RSHIFT -> "RSHIFT"
-    | T.ARSHIFT -> "ARSHIFT"
-    | T.XOR -> "XOR"
+    (* | T.ARSHIFT -> "ARSHIFT"
+    | T.XOR -> "XOR" *)
     in say (str op)
   and relop op =
     let str = function
@@ -55,10 +55,10 @@ let printtree (outstream, s) =
     | T.GT -> "GT"
     | T.LE -> "LE"
     | T.GE -> "GE"
-    | T.ULT -> "ULT"
+    (* | T.ULT -> "ULT"
     | T.ULE -> "ULE"
     | T.UGT -> "UGT"
-    | T.UGE -> "UGE"
+    | T.UGE -> "UGE" *)
     in say (str op)
   in
   stm (s, 0); sayln ""; flush outstream
