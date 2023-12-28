@@ -3,35 +3,50 @@ module S = Symbol
 
 type access = unit
 type ty = T.ty
+[@@deriving show]
 type enventry = VarEntry of {access : Translate.access; ty: ty; const: bool}
               | FunEntry of {level : Translate.level; label : Temp.label; formals: ty list; result: ty}
-
-let enter_to_table tbl lst =
-  let enter_single tbl (name, el) = S.enter tbl (S.symbol name) el in
-  List.fold_left enter_single tbl lst
+[@@deriving show]
 
 let base_tenv : ty S.table =
   let base_types = [
     ("int", T.INT);
     ("string", T.STRING)
   ] in
-  enter_to_table S.empty base_types
+  List.fold_left (fun tbl (name, el) -> S.enter tbl (S.symbol name) el)
+    S.empty
+    base_types
 
 let base_venv : enventry S.table =
-  let base_funcs = [
-    ("print", [T.STRING], T.UNIT);
-    ("flush", [], T.UNIT);
-    ("getchar", [], T.STRING);
-    ("ord", [T.STRING], T.INT);
-    ("chr", [T.INT], T.STRING);
-    ("size", [T.STRING], T.INT);
-    ("substring", [T.STRING; T.INT; T.INT], T.STRING);
-    ("concat", [T.STRING; T.STRING], T.STRING);
-    ("not", [T.INT], T.INT);
-    ("exit", [T.INT], T.UNIT)
-  ]
+  let base_funcs =
+    [
+        ("print", [ ("s", Types.STRING) ], Types.UNIT);
+        ("flush", [], Types.NIL);
+        ("getchar", [], Types.STRING);
+        ("ord", [ ("s", Types.STRING) ], Types.INT);
+        ("chr", [ ("i", Types.INT) ], Types.STRING);
+        ("size", [ ("s", Types.STRING) ], Types.INT);
+        ( "substring",
+          [ ("s", Types.STRING); ("first", Types.INT); ("n", Types.INT) ],
+          Types.STRING );
+        ("concat", [ ("s1", Types.STRING); ("s2", Types.STRING) ], Types.STRING);
+        ("not", [ ("i", Types.INT) ], Types.INT);
+        ("exit", [ ("i", Types.INT) ], Types.UNIT);
+      ]
   in
-  let makeFunEntry (name, params, result) =
-    (name, FunEntry {level=Translate.outermost; label=Temp.newlabel (); formals=params; result=result})
+  let make_fun_entry (name, formals, result) =
+    let label = Temp.namedlabel name in
+    (S.symbol name,
+     FunEntry {
+       level=Translate.newLevel { parent=Translate.outermost;
+                                  formals=List.map (fun _ -> false) formals;
+                                  name=label
+                                };
+       label=Temp.newlabel ();
+       formals=List.map (fun (_, t) -> t) formals;
+       result=result
+     })
   in
-  enter_to_table S.empty (List.map makeFunEntry base_funcs)
+  List.fold_left (fun tbl (name, el) -> S.enter tbl name el)
+    S.empty
+    (List.map make_fun_entry base_funcs)
