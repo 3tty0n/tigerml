@@ -114,7 +114,7 @@ let rec transExp venv tenv senv level exp =
   let rec trexp = function
     | A.VarExp var -> transVar venv tenv senv level var
 
-    | A.NilExp -> return (Translate.intExp 0) T.INT
+    | A.NilExp -> return (Translate.intExp 0) T.NIL
 
     | A.IntExp i -> return (Translate.intExp i) T.INT
 
