@@ -296,8 +296,8 @@ let rec transExp venv tenv senv level exp =
       let _ = if not (checkInt (testExpTy, pos)) then
           error pos ("Condition in while loop should have type int, not " ^ testTyStr)
       in
-      let _ = if bodyTy = T.NIL then
-          error pos ("Body of while loop should return nil, not " ^ bodyTyStr)
+      let _ = if bodyTy <> T.UNIT then
+          error pos ("Body of while loop should return unit, not " ^ bodyTyStr)
       in
       let _ = checkErr () in
       return (Translate.whileExp (testExp, bodyExp, end_label)) T.UNIT
@@ -319,13 +319,13 @@ let rec transExp venv tenv senv level exp =
       let senv' = { senv with break = Some end_label } in
       let { exp=bodyExp; ty=bodyTy } = transExp venv' tenv senv' level body in
       let bodyTyStr = tyStr bodyTy in
-      let _ = if bodyTy <> T.NIL then
-          error pos ("Body of for loop should have nil return type, not " ^ bodyTyStr ^ ".")
+      let _ = if bodyTy <> T.UNIT then
+          error pos ("Body of for loop should have unit return type, not " ^ bodyTyStr ^ ".")
       in
       let counter_exp= Translate.simpleVar (access, level) in
       checkErr ();
       let for_exp = Translate.forExp (counter_exp, loExp, hiExp, bodyExp, end_label) in
-      return for_exp T.NIL
+      return for_exp T.UNIT
 
     | A.BreakExp pos ->
       (match senv.break with
