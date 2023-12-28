@@ -1,6 +1,8 @@
 type temp = int
+[@@deriving show]
 
 let temps = ref 100
+
 let newtemp () =
   let t = !temps in
   let _ = temps := t+1 in
@@ -13,6 +15,7 @@ module Table = Table.IntMapTable(struct
 end)
 
 type label = Symbol.symbol
+[@@deriving show]
 
 let labels = ref 0
 

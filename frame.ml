@@ -1,32 +1,80 @@
-type exp = unit
+module type FRAME = sig
+  type access
+  type frame
 
-type access = InFrame of int
-            | InReg of Temp.temp
+  type newFrameParams = { name: Temp.label; formals : bool list }
 
-type frame = { name : Temp.label; formals : access list; locals : int ref }
+  type frag =
+    | PROC of { body : Tree.stm; frame : frame }
+    | STRING of Temp.label * string
 
-type newFrameParams = { name : Temp.label; formals : bool list }
+  val newFrame : newFrameParams -> frame
+  val formals : frame -> access list
+  val allocLocal : frame -> bool -> access
 
-let exp = ()
+  val name : frame -> Temp.label
 
-let buildFormalAccess formals =
-  let compine (n_frame, lst) = function
-    | true -> (n_frame + 1, InFrame ((n_frame + 1) * 4) :: lst)
-    | false -> (n_frame, InReg (Temp.newtemp ()) :: lst)
-  in
+  (* frame pointer *)
+  val fp : Temp.temp
+  (* return value *)
+  val rv : Temp.temp
+  val wordsize : int
+  val exp : access -> Tree.exp -> Tree.exp
 
-  let _, revrsedAccess = List.fold_left compine (0, []) formals in
-  List.rev revrsedAccess
+  val externalCall : string * Tree.exp list -> Tree.exp
 
-let newFrame ({name; formals} : newFrameParams) =
-  { name=name; formals=buildFormalAccess formals; locals=ref 0 }
+  val procEntryExit1 : frame * Tree.stm -> Tree.stm
+end
 
-let name ({name; _} : frame) = name
+module RiscVFrame : FRAME = struct
+  type access = InFrame of int
+              | InReg of Temp.temp
 
-let formals ({formals; _} : frame) = formals
+  type frame = { name : Temp.label; formals : access list; locals : int ref }
 
-let allocLocal ({locals; _} : frame) = function
-  | true ->
-    incr locals;
-    InFrame (!locals * 4)
-  | false -> InReg (Temp.newtemp ())
+  type newFrameParams = { name : Temp.label; formals : bool list }
+
+  type frag =
+    | PROC of { body : Tree.stm; frame : frame }
+    | STRING of Temp.label * string
+
+  let buildFormalAccess formals =
+    let compine (n_frame, lst) = function
+      | true -> (n_frame + 1, InFrame ((n_frame + 1) * 4) :: lst)
+      | false -> (n_frame, InReg (Temp.newtemp ()) :: lst)
+    in
+
+    let _, revrsedAccess = List.fold_left compine (0, []) formals in
+    List.rev revrsedAccess
+
+  let newFrame ({name; formals} : newFrameParams) =
+    { name=name; formals=buildFormalAccess formals; locals=ref 0 }
+
+  let name ({name; _} : frame) = name
+
+  let formals ({formals; _} : frame) = formals
+
+  let allocLocal ({locals; _} : frame) = function
+    | true ->
+      incr locals;
+      InFrame (!locals * 4)
+    | false -> InReg (Temp.newtemp ())
+
+  let fp = Temp.newtemp ()
+  let rv = Temp.newtemp ()
+
+  let wordsize = 8
+
+  let exp a e =
+    match a with
+    | InFrame k -> Tree.MEM (Tree.BINOP (Tree.PLUS, e, Tree.CONST k))
+    | InReg r -> Tree.TEMP r
+
+  let externalCall (name, exps) =
+    Tree.CALL (Tree.NAME (Temp.namedlabel name), exps)
+
+  let procEntryExit1 (frame, stm) = stm
+
+end
+
+module Frame : FRAME = RiscVFrame
