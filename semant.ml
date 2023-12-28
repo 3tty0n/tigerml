@@ -123,32 +123,35 @@ let rec transExp venv tenv senv level exp =
     | A.StringExp (s, _) -> return (Translate.stringExp s) T.STRING
 
     | A.CallExp {func; args; pos} ->
-      let funcName = quote (S.name func) in
-      (* ensure func is a function *)
-      let dec_level, label, formals, result = match getValue venv func pos with
-          Env.FunEntry {level; label; formals; result; } -> level, label, formals, result
+      begin
+        match Symbol.look venv func with
+        | Some (Env.FunEntry { formals; result; label; level = fn_level; _}) ->
+          print_endline (S.name func);
+
+          let rec process_args params argments i acc =
+            match params, argments with
+            | [], [] -> acc
+            | _, [] -> (error pos ("Not enough arguments supplied to " ^ (S.name func) ^ "."); [])
+            | [], _ -> (error pos ("Too many arguments supplied to " ^ (S.name func) ^ "."); [])
+            | phd :: ptl, ahd :: atl ->
+              let {exp=argExp; ty=argTy; } = trexp ahd in
+              let actual_phd= actualTy phd pos in
+              if not (checkTy actual_phd argTy) then
+                (error pos ("Type of argument " ^ (string_of_int i)
+                       ^ " to function call " ^ (S.name func) ^ " should be "
+                       ^ (tyStr actual_phd) ^ " (" ^ (tyStr argTy) ^ " found).");
+                 [])
+              else
+                process_args ptl atl (i + 1) acc @ [argExp]
+          in
+
+          let processed_args = process_args formals args 1 [] in
+          checkErr ();
+          return (Translate.callExp (label, fn_level, level, processed_args)) (actualTy result pos)
         | _ ->
-          let _ = error pos (funcName ^ " is not a function.") in
-          raise SemanticError
-      in
-      (* ensure the arguments are of the correct type and number *)
-      let rec checkParams params arguments i acc = match params, arguments with
-          [], [] -> acc
-        | _, [] -> (error pos ("Not enough arguments supplied to " ^ funcName ^ "."); [])
-        | [], _ -> (error pos ("Too many arguments supplied to " ^ funcName ^ "."); [])
-        | paramHd::paramTl, argHd::argTl ->
-          let {exp=argExp; ty=argTy; } = trexp argHd in
-          let actualParamHd = actualTy paramHd pos in
-          if not (checkTy actualParamHd argTy) then
-            (error pos ("Type of argument " ^ (string_of_int i)
-                       ^ " to function call " ^ funcName ^ " should be "
-                       ^ (tyStr actualParamHd) ^ " (" ^ (tyStr argTy) ^ " found).");
-            [])
-          else checkParams paramTl argTl (i+1) acc @ [argExp]
-      in
-      let processed_args = checkParams formals args 1 [] in
-      let _ = checkErr () in
-      return (Translate.callExp (label, dec_level, level, processed_args)) (actualTy result pos)
+          (error pos ("Undefined function " ^ (S.name func));
+          raise SemanticError)
+      end
 
     | A.OpExp {left; oper; right; pos} ->
       let op = quote (opStr oper) in
