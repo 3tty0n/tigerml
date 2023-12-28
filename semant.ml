@@ -77,6 +77,8 @@ let rec actualTy ty pos = match ty with
 
 let checkInt ({ty; _}, pos) = actualTy ty pos = T.INT
 
+let checkNil ({ty; _}, pos) = actualTy ty pos = T.NIL
+
 let getValue venv sym pos = match S.look venv sym with
   Some value -> value
 | None ->
@@ -225,16 +227,17 @@ let rec transExp venv tenv senv level exp =
       let _ = checkErr () in
       return (Translate.recordExp translated) ty
 
+    | A.SeqExp [] ->            (* handling unit, () *)
+      return (Translate.intExp 0) T.UNIT
+
     | A.SeqExp lst ->
-      let fst = fun (x,_) -> x in
-      let exps = List.map fst lst in
-      (* typecheck each expression, and yield the last one's result *)
-      let combine (acc, _) next =
-        let { exp; ty } = trexp next in
-        (acc @ [exp], ty)
-      in
-      let translated, ty = List.fold_left combine ([], T.UNIT) exps in
-      return (Translate.seqExp translated) ty
+      let exps', ty =
+        List.fold_left
+          (fun (l, _) (e, _) ->
+             let { exp; ty } = trexp e in
+             (l @ [ exp ], ty)
+          ) ([], Types.NIL) lst in
+      return (Translate.seqExp exps') ty
 
     | A.AssignExp {var; exp; pos} ->
 
@@ -293,8 +296,8 @@ let rec transExp venv tenv senv level exp =
       let _ = if not (checkInt (testExpTy, pos)) then
           error pos ("Condition in while loop should have type int, not " ^ testTyStr)
       in
-      let _ = if bodyTy <> T.UNIT then
-          error pos ("Body of while loop should have a unit return type, not " ^ bodyTyStr)
+      let _ = if bodyTy = T.NIL then
+          error pos ("Body of while loop should return nil, not " ^ bodyTyStr)
       in
       let _ = checkErr () in
       return (Translate.whileExp (testExp, bodyExp, end_label)) T.UNIT
@@ -316,13 +319,13 @@ let rec transExp venv tenv senv level exp =
       let senv' = { senv with break = Some end_label } in
       let { exp=bodyExp; ty=bodyTy } = transExp venv' tenv senv' level body in
       let bodyTyStr = tyStr bodyTy in
-      let _ = if bodyTy <> T.UNIT then
-          error pos ("Body of for loop should have a unit return type, not " ^ bodyTyStr ^ ".")
+      let _ = if bodyTy <> T.NIL then
+          error pos ("Body of for loop should have nil return type, not " ^ bodyTyStr ^ ".")
       in
       let counter_exp= Translate.simpleVar (access, level) in
-      let _ = checkErr () in
+      checkErr ();
       let for_exp = Translate.forExp (counter_exp, loExp, hiExp, bodyExp, end_label) in
-      return for_exp T.UNIT
+      return for_exp T.NIL
 
     | A.BreakExp pos ->
       (match senv.break with
