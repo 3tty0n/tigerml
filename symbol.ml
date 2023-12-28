@@ -1,4 +1,5 @@
 type symbol = string * int
+[@@deriving show]
 
 module H = Hashtbl
 
@@ -10,14 +11,14 @@ let hashtable : (string, int) H.t = H.create 1000
 let symbol name =
     match H.find_opt hashtable name with
       Some i -> (name, i)
-    | None -> let i = !nextsym in 
+    | None -> let i = !nextsym in
         nextsym := i+1;
 	      H.add hashtable name i;
 	      (name, i)
 
 let name (s, n) = s
 
-module Tbl = Table.IntMapTable(struct 
+module Tbl = Table.IntMapTable(struct
   type key = symbol
   let getInt (s,n) = n
 end)

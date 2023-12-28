@@ -3,7 +3,8 @@ let run filename =
     let ast = Parse.parse filename in
     let _ = FindEscape.findEscape ast in
     let _ = Semant.transProg ast in
-    Prabsyn.print (stdout, ast)
+    Absyn.show_exp ast |> print_endline
+    (* Prabsyn.print (stdout, ast) *)
   with Semant.SemanticError -> print_endline ("Failed to typecheck \"" ^ filename ^ "\"."); exit 1
 
 let main () = run (Sys.argv.(1))
