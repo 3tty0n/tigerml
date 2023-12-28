@@ -3,11 +3,11 @@ module S = Symbol
 
 type access = unit
 type ty = T.ty
-type enventry = VarEntry of {ty: ty; const: bool}
-              | FunEntry of {formals: ty list; result: ty}
+type enventry = VarEntry of {access : Translate.access; ty: ty; const: bool}
+              | FunEntry of {level : Translate.level; label : Temp.label; formals: ty list; result: ty}
 
 let enter_to_table tbl lst =
-  let enter_single tbl (name, el) = S.enter (tbl, S.symbol name, el) in
+  let enter_single tbl (name, el) = S.enter tbl (S.symbol name) el in
   List.fold_left enter_single tbl lst
 
 let base_tenv : ty S.table =
@@ -32,6 +32,6 @@ let base_venv : enventry S.table =
   ]
   in
   let makeFunEntry (name, params, result) =
-    (name, FunEntry {formals=params; result=result})
+    (name, FunEntry {level=Translate.outermost; label=Temp.newlabel (); formals=params; result=result})
   in
   enter_to_table S.empty (List.map makeFunEntry base_funcs)

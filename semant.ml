@@ -1,19 +1,20 @@
 module A = Absyn
 module S = Symbol
 module T = Types
+module Tr = Translate
 
 type venv = Env.enventry S.table
 type tenv = T.ty S.table
 type env = {venv: venv; tenv: tenv}
 
-type expty = {exp: Translate.exp; ty: T.ty}
+type expty = {exp: Tr.exp; ty: T.ty}
 
 exception SemanticError
 
 (* string utils *)
 let quote str = "\"" ^ str ^ "\""
 
-let tyStr ty = 
+let tyStr ty =
   (* first signifies if function is called for the first time *)
   let rec tyStr_ first ty = match ty with
     T.INT -> "int"
@@ -33,12 +34,12 @@ let tyStr ty =
     else "array"
   | T.NIL -> "nil"
   | T.UNIT -> "unit"
-  | T.NAME (name, tyref) -> 
+  | T.NAME (name, tyref) ->
     let prefix = "name(" ^ (S.name name) ^ ", " in
     (match !tyref with
       Some ty -> prefix ^ "some)"
     | None -> prefix ^ "none)")
-    
+
   in
   tyStr_ true ty
 
@@ -65,7 +66,7 @@ let et exp ty = {exp=exp; ty=ty}
 let rec actualTy ty pos = match ty with
   T.NAME (sym, reference) -> (match !reference with
     Some resolved -> actualTy resolved pos
-  | None -> 
+  | None ->
     let _ = error pos ("The type \"" ^ (S.name sym) ^ "\" has still not been resolved.") in
     raise SemanticError
   )
@@ -73,13 +74,13 @@ let rec actualTy ty pos = match ty with
 
 let checkInt ({ty; _}, pos) = actualTy ty pos = T.INT
 
-let getValue venv sym pos = match S.look (venv, sym) with
+let getValue venv sym pos = match S.look venv sym with
   Some value -> value
 | None ->
   let _ = error pos ("The value \"" ^ (S.name sym) ^ "\" is undefined.") in
   raise SemanticError
 
-let getType tenv sym pos = match S.look (tenv, sym) with
+let getType tenv sym pos = match S.look tenv sym with
   Some typ -> typ
 | None ->
   let _ = error pos ("The type \"" ^ (S.name sym) ^ "\" is undefined.") in
@@ -92,10 +93,10 @@ let checkTy expected actual = match expected with
   T.RECORD _ -> expected == actual || actual = T.NIL
 | _ -> expected == actual
 
-let isConst venv var pos = match var with 
+let isConst venv var pos = match var with
   A.SimpleVar (sym, _) -> (match getValue venv sym pos with
     Env.VarEntry {const;_} -> const
-  | _ -> false)  
+  | _ -> false)
 | _ -> false
 
 let rec contains lst el = match lst with
@@ -108,9 +109,9 @@ let loop_depth = ref 0
 (* main typechecking functions *)
 
 (*  venv * tenv * Absyn.exp -> expty  *)
-let rec transExp (venv, tenv, exp) =
+let rec transExp venv tenv level exp =
   let rec trexp = function
-    A.VarExp var -> transVar (venv, tenv, var)
+    A.VarExp var -> transVar venv tenv level var
 
   | A.NilExp -> et () T.NIL
 
@@ -122,8 +123,8 @@ let rec transExp (venv, tenv, exp) =
     let funcName = quote (S.name func) in
     (* ensure func is a function *)
     let formals, result = match getValue venv func pos with
-      Env.FunEntry {formals; result} -> formals, result
-    | _ -> 
+      Env.FunEntry {formals; result; _} -> formals, result
+    | _ ->
       let _ = error pos (funcName ^ " is not a function.") in
       raise SemanticError
     in
@@ -154,7 +155,7 @@ let rec transExp (venv, tenv, exp) =
     in
     let isIntOnlyOp = not isStringOp in
     let {ty=lty;_} as lexpty = trexp left in
-    let {ty=rty;_} as rexpty = trexp right in 
+    let {ty=rty;_} as rexpty = trexp right in
     let lTyStr = tyStr lty in
     let rTyStr = tyStr rty in
     let _ = if isIntOnlyOp then
@@ -196,7 +197,7 @@ let rec transExp (venv, tenv, exp) =
     | (fsym, fty)::ftl, (asym, exp, _)::atl ->
       let actualFty = actualTy fty pos in
       let fname = quote (S.name fsym) in
-      let aname = quote (S.name asym) in  
+      let aname = quote (S.name asym) in
       if fsym <> asym then
         error pos ("Expected field " ^ fname ^ ", but found "
          ^ aname ^ " in " ^ typeName ^ " instantiation.")
@@ -223,7 +224,7 @@ let rec transExp (venv, tenv, exp) =
 
   | A.AssignExp {var; exp; pos} ->
 
-    let {ty=varTy; _} = transVar (venv, tenv, var) in
+    let {ty=varTy; _} = transVar venv tenv level var in
     let {ty=expTy; _} = trexp exp in
     let varTyStr = tyStr varTy in
     let expTyStr = tyStr expTy in
@@ -278,21 +279,22 @@ let rec transExp (venv, tenv, exp) =
     let _ = checkErr () in
     et () T.UNIT
 
-  | A.ForExp {var; lo; hi; body; pos; _} ->
+  | A.ForExp {var; escape; lo; hi; body; pos} ->
     let {ty=loTy; _} as loExpTy = trexp lo in
     let {ty=hiTy; _} as hiExpTy = trexp hi in
     let loTyStr = tyStr loTy in
     let hiTyStr = tyStr hiTy in
-    let venv' = S.enter (venv, var, Env.VarEntry {ty=T.INT; const=true}) in
+    let access = Tr.allocLocal level (!escape) in
+    let venv' = S.enter venv var (Env.VarEntry {access=access; ty=T.INT; const=true}) in
     let _ = if not (checkInt (loExpTy, pos)) then
       error pos ("For loop lower bound should have type int, not " ^ loTyStr ^ ".")
     in
     let _ = if not (checkInt (hiExpTy, pos)) then
       error pos ("For loop upper bound should have type int, not " ^ hiTyStr ^ ".")
     in
-    let _ = loop_depth:= !loop_depth + 1 in
-    let {ty=bodyTy; _} = transExp (venv', tenv, body) in
-    let _ = loop_depth:= !loop_depth - 1 in
+    let _ = loop_depth := !loop_depth + 1 in
+    let {ty=bodyTy; _} = transExp venv' tenv level body in
+    let _ = loop_depth := !loop_depth - 1 in
     let bodyTyStr = tyStr bodyTy in
     let _ = if bodyTy <> T.UNIT then
       error pos ("Body of for loop should have a unit return type, not " ^ bodyTyStr ^ ".")
@@ -300,16 +302,16 @@ let rec transExp (venv, tenv, exp) =
     let _ = checkErr () in
     et () T.UNIT
 
-  | A.BreakExp pos -> if (!loop_depth) <= 0 then 
+  | A.BreakExp pos -> if (!loop_depth) <= 0 then
       let _ = error pos "Break statement used outside of a loop." in
       raise SemanticError
     else et () T.UNIT
 
   | A.LetExp {decs; body; pos} ->
-    let combine {venv; tenv} dec = transDec (venv, tenv, dec) in
+    let combine {venv; tenv} dec = transDec venv tenv level dec in
     let {venv=venv'; tenv=tenv'} = List.fold_left combine {venv=venv; tenv=tenv} decs in
     let _ = checkErr () in
-    let {ty=bodyTy; _} = transExp (venv', tenv', body) in
+    let {ty=bodyTy; _} = transExp venv' tenv level body in
     let _ = checkErr () in
     et () bodyTy
 
@@ -342,7 +344,7 @@ let rec transExp (venv, tenv, exp) =
   trexp exp
 
 (*  venv * tenv * Absyn.var -> expty  *)
-and transVar (venv, tenv, var) = match var with
+and transVar venv tenv level var = match var with
   A.SimpleVar (sym, pos) ->
   let varStr = S.name sym in
   let ty = match getValue venv sym pos with
@@ -356,7 +358,7 @@ and transVar (venv, tenv, var) = match var with
 | A.FieldVar (recVar, sym, pos) ->
   let fieldStr = quote (S.name sym) in
   (* ensure that the lvalue is a record type *)
-  let {ty=recTy; _} = transVar (venv, tenv, recVar) in
+  let {ty=recTy; _} = transVar venv tenv level recVar in
   let fieldList = match recTy with
     T.RECORD (lst, _) -> lst
   | _ ->
@@ -364,7 +366,7 @@ and transVar (venv, tenv, var) = match var with
     raise SemanticError
   in
   let rec findField field = function
-    [] -> 
+    [] ->
       let _ = error pos ("Unknown field " ^ fieldStr ^ ".") in
       raise SemanticError
   | (fieldSym, fieldTy)::fieldTl ->
@@ -376,14 +378,14 @@ and transVar (venv, tenv, var) = match var with
   findField sym fieldList
 
 | A.SubscriptVar (arrVar, exp, pos) ->
-  let {ty=arrTy; _} = transVar (venv, tenv, arrVar) in
+  let {ty=arrTy; _} = transVar venv tenv level arrVar in
   let resultTy = match arrTy with
     T.ARRAY (ty, _) -> actualTy ty pos
   | _ ->
     let _ = error pos ("Cannot take subscript of a non-array type.") in
     raise SemanticError
   in
-  let {ty=expTy; _} as expExpTy = transExp (venv, tenv, exp) in
+  let {ty=expTy; _} as expExpTy = transExp venv tenv level exp in
   let expTyStr = tyStr expTy in
   let _ = if not (checkInt (expExpTy, pos)) then
     error pos ("Subscript of array should have type int, not " ^ expTyStr ^ ".")
@@ -392,9 +394,9 @@ and transVar (venv, tenv, var) = match var with
   et () resultTy
 
 (*  venv * tenv * Absyn.dec -> {venv: venv; tenv: tenv}  *)
-and transDec (venv, tenv, dec) = match dec with
-  A.VarDec {name; typ; init; pos; _} ->
-  let {ty=initTy; _} = transExp (venv, tenv, init) in
+and transDec venv tenv level dec = match dec with
+  A.VarDec {name; escape; typ; init; pos} ->
+  let {ty=initTy; _} = transExp venv tenv level init in
   let initTyStr = tyStr initTy in
   let _ = match typ with
     Some (sym, pos) ->
@@ -407,8 +409,9 @@ and transDec (venv, tenv, dec) = match dec with
   | None -> if initTy = T.NIL then
       error pos "Cannot initialize variable to nil without an explicit type declaration."
   in
+  let access = Tr.allocLocal level (!escape) in
   let _ = checkErr () in
-  {venv=S.enter (venv, name, Env.VarEntry {ty=initTy; const=false}); tenv=tenv}
+  {venv=S.enter venv name (Env.VarEntry {access=access; ty=initTy; const=false}); tenv=tenv}
 
 | A.FunctionDec lst ->
   (* create new value environment *)
@@ -418,13 +421,15 @@ and transDec (venv, tenv, dec) = match dec with
       let nameStr = quote (S.name name) in
       let _ = error pos ("Function " ^ nameStr ^ " was defined multiple times in a sequence of adjacent function declarations.") in
       raise SemanticError
-    else 
-      let formals = List.map getFieldType params in
+    else
+      let formalTys = List.map getFieldType params in
+      let formalEscapes = List.map (fun ({escape; _}: A.field) -> !escape) params in
       let resultTy = match result with
         Some (sym, pos) -> getActualType tenv sym pos
       | None -> T.UNIT
       in
-      (name :: seen), S.enter (venv, name, (Env.FunEntry {formals=formals; result=resultTy}))
+      let newLevel = Tr.newLevel {parent=level; name=name; formals=formalEscapes} in
+      (name :: seen), S.enter venv name (Env.FunEntry {level=newLevel; label=name; formals=formalTys; result=resultTy})
   in
   let (_, venv') = List.fold_left enterFunctionNames ([], venv) lst in
   (* then, typecheck each individual function *)
@@ -434,13 +439,14 @@ and transDec (venv, tenv, dec) = match dec with
       Env.FunEntry {result; _} -> result
     | _ -> ErrorMsg.impossible (funcName ^ " is not a function entry while typechecking function bodies.")
     in
-    let enterParams venv ({name; typ; _} : A.field) =
+    let enterParams venv ({name; escape; typ; pos} : A.field) =
       let paramTy = getActualType tenv typ pos in
-      S.enter (venv, name, (Env.VarEntry {ty=paramTy; const=true}))
+      let access = Tr.allocLocal level (!escape) in
+      S.enter venv name (Env.VarEntry {access=access; ty=paramTy; const=true})
     in
     (* create value environment inside function *)
     let venv'' = List.fold_left enterParams venv' params in
-    let {ty=bodyTy; _} = transExp (venv'', tenv, body) in
+    let {ty=bodyTy; _} = transExp venv'' tenv level body in
     if not (checkTy resultTy bodyTy) then
       let resultTyStr = tyStr resultTy in
       let bodyTyStr = tyStr bodyTy in
@@ -459,12 +465,12 @@ and transDec (venv, tenv, dec) = match dec with
       let _ = error pos ("Type " ^ nameStr ^ " was defined multiple times in a sequence of adjacent type declarations.") in
       raise SemanticError
     else
-      (name :: seen), S.enter (tenv, name, (T.NAME (name, ref None)))
+      (name :: seen), S.enter tenv name (T.NAME (name, ref None))
   in
   let (_, tenv') = List.fold_left enterTypeNames ([], tenv) lst in
   let resolveTypes ({name; ty; pos} : A.typedec) =
     let nameStr = S.name name in
-    let resolved = transTy (tenv', ty) in
+    let resolved = transTy tenv' ty in
     let reference = match getType tenv' name pos with
       T.NAME (_, reference) -> reference
     | _ -> ErrorMsg.impossible (nameStr ^ " is not a NAME entry while typechecking type declarations.")
@@ -496,7 +502,7 @@ and transDec (venv, tenv, dec) = match dec with
   {venv=venv; tenv=tenv'}
 
 (*  tenv * Absyn.ty -> Types.ty  *)
-and transTy (tenv, ty) = match ty with
+and transTy tenv ty = match ty with
   A.NameTy (sym, pos) -> getType tenv sym pos
 
 | A.RecordTy lst ->
@@ -512,5 +518,5 @@ and transTy (tenv, ty) = match ty with
   T.ARRAY (ty, ref ())
 
 let transProg ast =
-  let _ = transExp (Env.base_venv, Env.base_tenv, ast) in
+  let _ = transExp Env.base_venv Env.base_tenv Tr.outermost ast in
   ()
