@@ -1,0 +1,10 @@
+let
+  function f(x: int) : int  =
+    let
+      function g(y: int) : int = x + y
+    in
+      g(1)
+    end
+in
+  f(1)
+end
