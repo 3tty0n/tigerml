@@ -8,6 +8,6 @@ val transVar: venv -> tenv -> senv -> Translate.level -> Absyn.var -> expty
 val transExp: venv -> tenv -> senv -> Translate.level -> Absyn.exp -> expty
 val transDec: venv -> tenv -> senv -> Translate.level -> Absyn.dec -> env * Translate.exp list
 val transTy:          tenv -> Absyn.ty  -> Types.ty
-val transProg:                Absyn.exp -> Translate.exp
+val transProg:                Absyn.exp -> Translate.exp * Translate.frag list
 
 exception SemanticError

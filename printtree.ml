@@ -44,8 +44,8 @@ let printtree (outstream, s) =
     | T.OR -> "OR"
     | T.LSHIFT -> "LSHIFT"
     | T.RSHIFT -> "RSHIFT"
-    (* | T.ARSHIFT -> "ARSHIFT"
-    | T.XOR -> "XOR" *)
+    | T.XOR -> "XOR"
+    (* | T.ARSHIFT -> "ARSHIFT" *)
     in say (str op)
   and relop op =
     let str = function

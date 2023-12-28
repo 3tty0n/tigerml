@@ -42,3 +42,11 @@ and binop = PLUS | MINUS | MUL | DIV
 
 and relop = EQ | NE | LT | GT | LE | GE (* | ULT | ULE | UGT | UGE *)
 [@@deriving show]
+
+let not_rel = function
+  | EQ -> NE
+  | NE -> EQ
+  | LT -> GE
+  | GT -> LE
+  | LE -> GT
+  | GE -> LT

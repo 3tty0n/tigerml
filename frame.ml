@@ -10,6 +10,7 @@ module type FRAME = sig
   type frag =
     | PROC of { body : Tree.stm; frame : frame }
     | STRING of Temp.label * string
+  [@@deriving show]
 
   val newFrame : newFrameParams -> frame
   val formals : frame -> access list
@@ -42,6 +43,7 @@ module RiscVFrame : FRAME = struct
   type frag =
     | PROC of { body : Tree.stm; frame : frame }
     | STRING of Temp.label * string
+  [@@deriving show]
 
   let buildFormalAccess formals =
     let compine (n_frame, lst) = function

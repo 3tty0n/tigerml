@@ -126,8 +126,6 @@ let rec transExp venv tenv senv level exp =
       begin
         match Symbol.look venv func with
         | Some (Env.FunEntry { formals; result; label; level = fn_level; _}) ->
-          print_endline (S.name func);
-
           let rec process_args params argments i acc =
             match params, argments with
             | [], [] -> acc
@@ -560,4 +558,4 @@ and transTy tenv ty = match ty with
 let transProg ast =
   Translate.init ();
   let {exp; ty} = transExp (Env.base_venv) (Env.base_tenv) base_senv Tr.outermost ast in
-  exp
+  exp, Translate.getResult ()
