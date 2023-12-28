@@ -42,7 +42,7 @@ let base_venv : enventry S.table =
                                   formals=List.map (fun _ -> false) formals;
                                   name=label
                                 };
-       label=Temp.newlabel ();
+       label=label;
        formals=List.map (fun (_, t) -> t) formals;
        result=result
      })
