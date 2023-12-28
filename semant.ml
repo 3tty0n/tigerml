@@ -125,29 +125,30 @@ let rec transExp venv tenv senv level exp =
     | A.CallExp {func; args; pos} ->
       let funcName = quote (S.name func) in
       (* ensure func is a function *)
-      let formals, result = match getValue venv func pos with
-          Env.FunEntry {formals; result; _} -> formals, result
+      let dec_level, label, formals, result = match getValue venv func pos with
+          Env.FunEntry {level; label; formals; result; } -> level, label, formals, result
         | _ ->
           let _ = error pos (funcName ^ " is not a function.") in
           raise SemanticError
       in
       (* ensure the arguments are of the correct type and number *)
-      let rec checkParams params arguments i = match params, arguments with
-          [], [] -> ()
-        | _, [] -> error pos ("Not enough arguments supplied to " ^ funcName ^ ".")
-        | [], _ -> error pos ("Too many arguments supplied to " ^ funcName ^ ".")
+      let rec checkParams params arguments i acc = match params, arguments with
+          [], [] -> acc
+        | _, [] -> (error pos ("Not enough arguments supplied to " ^ funcName ^ "."); [])
+        | [], _ -> (error pos ("Too many arguments supplied to " ^ funcName ^ "."); [])
         | paramHd::paramTl, argHd::argTl ->
-          let {ty=argTy; _} = trexp argHd in
+          let {exp=argExp; ty=argTy; } = trexp argHd in
           let actualParamHd = actualTy paramHd pos in
           if not (checkTy actualParamHd argTy) then
-            error pos ("Type of argument " ^ (string_of_int i)
+            (error pos ("Type of argument " ^ (string_of_int i)
                        ^ " to function call " ^ funcName ^ " should be "
-                       ^ (tyStr actualParamHd) ^ " (" ^ (tyStr argTy) ^ " found).")
-          else checkParams paramTl argTl (i+1)
+                       ^ (tyStr actualParamHd) ^ " (" ^ (tyStr argTy) ^ " found).");
+            [])
+          else checkParams paramTl argTl (i+1) acc @ [argExp]
       in
-      let _ = checkParams formals args 1 in
+      let processed_args = checkParams formals args 1 [] in
       let _ = checkErr () in
-      return Translate.default_exp (actualTy result pos)
+      return (Translate.callExp (label, processed_args, dec_level, level)) (actualTy result pos)
 
     | A.OpExp {left; oper; right; pos} ->
       let op = quote (opStr oper) in
