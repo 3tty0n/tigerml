@@ -1,43 +1,28 @@
+type symbol = string * int
 
-module Hashtbl = MoreLabels.Hashtbl
+module H = Hashtbl
 
-type symbol = { name : string; symbol : int }
-[@@deriving show]
+exception Symbol
 
-type t = symbol
-[@@deriving show]
-
-let symbols = Hashtbl.create 16
-
-let next =
-  let counter = ref 0 in
-  fun () ->
-    incr counter;
-    !counter
-
-let unique name =
-  { name; symbol = next () }
+let nextsym = ref 0
+let hashtable : (string, int) H.t = H.create 1000
 
 let symbol name =
-  match Hashtbl.find_opt symbols name with
-  | Some symbol -> { name; symbol }
-  | None ->
-    let t = unique name in
-    Hashtbl.replace symbols ~key:t.name ~data:t.symbol;
-    t
+    match H.find_opt hashtable name with
+      Some i -> (name, i)
+    | None -> let i = !nextsym in 
+        nextsym := i+1;
+	      H.add hashtable name i;
+	      (name, i)
 
-let name { name; _ } = name
+let name (s, n) = s
 
-module Table = Map.Make(
-  struct
-    type t = symbol
-    let compare {name=_; symbol=n1} {name=_; symbol=n2} = compare n1 n2
-  end)
+module Tbl = Table.IntMapTable(struct 
+  type key = symbol
+  let getInt (s,n) = n
+end)
 
-type 'a table = 'a Table.t
-
-let empty = Table.empty
-
-let enter (t : 'a table) (k : symbol) (v : 'a) = Table.add k v t
-
-let look (t : 'a table) (k : symbol) = Table.find_opt k t
+type 'a table = 'a Tbl.table
+let empty = Tbl.empty
+let enter = Tbl.enter
+let look = Tbl.look

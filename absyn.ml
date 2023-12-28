@@ -1,64 +1,37 @@
-module Sym = Symbol
-module Pos = Position
-
-type oper =
-  | PlusOp
-  | MinusOp
-  | TimesOp
-  | DivideOp
-  | EqOp
-  | NeqOp
-  | LtOp
-  | LeOp
-  | GtOp
-  | GeOp
-[@@deriving show]
-
-type exp =
-  | NilExp
-  | IntExp of int
-  | StringExp of { string : string; pos : Pos.t }
-  | CallExp of { func : Sym.t; args : exp list; pos : Pos.t }
-  | OpExp of { left : exp; oper : oper; right : exp; pos : Pos.t }
-  | RecordExp of { fields : (Sym.t * exp * Pos.t) list; typ : Sym.t; pos : Pos.t }
-  | SeqExp of (exp * Pos.t) list
-  | AssignExp of { var : var; exp : exp; pos : Pos.t }
-  | IfExp of { test : exp; then' : exp; else' : exp option; pos : Pos.t }
-  | WhileExp of { test : exp; body : exp;  pos : Pos.t }
-  | ForExp of { var : Sym.t; escape : bool ref; lo : exp; hi : exp; body : exp; pos : Pos.t }
-  | BreakExp of Pos.t
-  | LetExp of { decs : dec list; body : exp; pos : Pos.t  }
-  | ArrayExp of { typ : Sym.t; size : exp; init : exp; pos : Pos.t }
-  | VarExp of var
-[@@deriving show]
-
-and var =
-  | SimpleVar of { symbol : Sym.t; pos : Pos.t }
-  | FieldVar of { var : var; symbol : Sym.t ; pos : Pos.t }
-  | SubScriptVar of { var : var; exp : exp; pos : Pos.t }
-[@@deriving show]
-
-and dec =
-  | VarDec of { name : Sym.t; escape : bool ref; typ : (Sym.t * Pos.t) option; init : exp; pos : Pos.t }
-  | TypeDec of typedec list
-  | FunctionDec of fundec list
-[@@deriving show]
-
-and ty =
-  | NameTy of { symbol : Sym.t; pos : Pos.t }
-  | RecordTy of field list
-  | ArrayTy of { symbol : Sym.t; pos : Pos.t }
-[@@deriving show]
-
-and field =
-    Field of { name : Sym.t; escape : bool ref; typ : Sym.t; pos : Pos.t }
-[@@deriving show]
-
-and typedec = { name : Sym.t; ty : ty; pos : Pos.t }
-[@@deriving show]
-
-and fundec = { name : Sym.t; params : field list; result : (Sym.t * Pos.t) option; body : exp; pos : Pos.t }
-[@@deriving show]
-
-type t = exp
-[@@deriving show]
+type pos = int
+type symbol = Symbol.symbol
+type var = SimpleVar of symbol * pos
+            | FieldVar of var * symbol * pos
+            | SubscriptVar of var * exp * pos
+and exp = VarExp of var
+        | NilExp
+        | IntExp of int
+        | StringExp of string * pos
+        | CallExp of {func: symbol; args: exp list; pos: pos}
+        | OpExp of {left: exp; oper: oper; right: exp; pos: pos}
+        | RecordExp of {fields: (symbol * exp * pos) list;
+            typ: symbol; pos: pos}
+        | SeqExp of (exp * pos) list
+        | AssignExp of {var: var; exp: exp; pos: pos}
+        | IfExp of {test: exp; then': exp; else': exp option; pos: pos}
+        | WhileExp of {test: exp; body: exp; pos: pos}
+        | ForExp of {var: symbol; escape: bool ref; lo: exp; hi: exp;
+            body: exp; pos: pos}
+        | BreakExp of pos
+        | LetExp of {decs: dec list; body: exp; pos: pos}
+        | ArrayExp of {typ: symbol; size: exp; init: exp; pos: pos}
+and dec = FunctionDec of fundec list
+        | VarDec of {name: symbol; escape: bool ref;
+            typ: (symbol * pos) option; init: exp; pos: pos}
+        | TypeDec of typedec list
+and ty = NameTy of symbol * pos
+       | RecordTy of field list
+       | ArrayTy of symbol * pos
+and oper = PlusOp | MinusOp | TimesOp | DivideOp
+         | EqOp | NeqOp | LtOp | LeOp | GtOp | GeOp
+and field = {name: symbol; escape: bool ref; 
+              typ: symbol; pos: pos}
+and fundec = {name: symbol; params: field list;
+               result: (symbol * pos) option; body: exp;
+               pos: pos}
+and typedec = {name: symbol; ty: ty; pos: pos}

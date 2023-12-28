@@ -1,381 +1,516 @@
-module Translate = struct
-  type exp = unit
-  let dummy_fixme = ()
-end
-
 module A = Absyn
 module S = Symbol
 module T = Types
-module E = Env
 
-type venv = E.enventry S.table
+type venv = Env.enventry S.table
 type tenv = T.ty S.table
+type env = {venv: venv; tenv: tenv}
 
-type expty = { exp : Translate.exp; ty : Types.ty }
+type expty = {exp: Translate.exp; ty: T.ty}
 
-type transdecty = { venv : venv; tenv : tenv }
+exception SemanticError
 
-let get_typ = function Some ty -> ty | None -> T.BOTTOM
+(* string utils *)
+let quote str = "\"" ^ str ^ "\""
 
-let from_symbol ty_name =
-  match ty_name with
-  | Types.NAME (name, typ_opt_ref) ->
-    (match name with
-     | S.{ name="int"; _ } -> Some (Types.INT)
-     | S.{ name="string"; _ } -> Some (Types.STRING)
-     | _ -> None)
-  | _ -> None
+let tyStr ty = 
+  (* first signifies if function is called for the first time *)
+  let rec tyStr_ first ty = match ty with
+    T.INT -> "int"
+  | T.STRING -> "string"
+  | T.RECORD (lst, _) ->
+    if first then
+      match lst with
+        [] -> "{}"
+      | hd::tl ->
+        let strForField (sym, ty) = (S.name sym) ^ ":" ^ (tyStr_ false ty) in
+        let combine agg next = agg ^ "; " ^ next in
+        let body = List.fold_left combine (strForField hd) (List.map strForField tl) in
+        "{" ^ body ^ "}"
+    else "record"
+  | T.ARRAY (ty, _) ->
+    if first then "array of " ^ (tyStr_ false ty)
+    else "array"
+  | T.NIL -> "nil"
+  | T.UNIT -> "unit"
+  | T.NAME (name, tyref) -> 
+    let prefix = "name(" ^ (S.name name) ^ ", " in
+    (match !tyref with
+      Some ty -> prefix ^ "some)"
+    | None -> prefix ^ "none)")
+    
+  in
+  tyStr_ true ty
 
-let rec actual_ty ty ~pos =
-  match ty with
-  | Types.NAME (name, typ_opt_ref) ->
-    (match from_symbol ty with
-    | Some ty -> ty
-    | None ->
-      (match !typ_opt_ref with
-       | None -> failwith ("unkown type:" ^ (S.name name))
-       | Some ty -> actual_ty ty ~pos))
-  | Types.UNIT
-  | Types.NIL
-  | Types.INT
-  | Types.STRING
-  | Types.RECORD _
-  | Types.ARRAY _
-  | Types.BOTTOM -> ty
+let opStr = function
+    A.PlusOp -> "+"
+  | A.MinusOp -> "-"
+  | A.TimesOp -> "*"
+  | A.DivideOp -> "/"
+  | A.EqOp -> "="
+  | A.NeqOp -> "<>"
+  | A.LtOp -> "<"
+  | A.LeOp -> "<="
+  | A.GtOp -> ">"
+  | A.GeOp -> ">="
 
-let get_typ_from_env ~sym ~env ~pos =
-  match Symbol.look env sym with
-  | Some ty -> ty
-  | None -> failwith ("Unknown type:" ^ S.name sym)
 
-let get_typ_actual_from_env ~sym ~env ~pos =
-  actual_ty (get_typ_from_env ~sym ~env ~pos) ~pos
+(* helper functions *)
+let error pos msg = ErrorMsg.error pos msg
 
-let check_type_assignable var value pos err_msg =
-  if T.comp var value = T.EQ || T.comp var value = T.GT
-  then ()
-  else failwith err_msg
+let checkErr () = if !(ErrorMsg.anyErrors) then raise SemanticError
 
-let nest_depth = ref 0
-let set_nest_depth n = nest_depth := n
+let et exp ty = {exp=exp; ty=ty}
 
-let rec trans_exp venv tenv exp =
-  let open Absyn in
-  let rec trexp exp =
-    match exp with
-    | VarExp var -> trvar var
-    | NilExp -> return_nil ()
-    | IntExp _ -> return_int ()
-    | StringExp {string=_; _} -> return_string ()
-    | OpExp { left; oper; right; pos } ->
-      let expty_left = trexp left in
-      let expty_right = trexp right in
-      check_same expty_left expty_right pos;
-      (match oper with
-       | PlusOp | MinusOp | TimesOp | DivideOp ->
-         check_int expty_left pos;
-         check_int expty_right pos;
-         return_int ()
-       | EqOp | NeqOp ->
-         let { exp=_; ty } = expty_left in
-         if T.is_int ty || T.is_string ty then
-           return_int ()
-         else
-           failwith "invalid operation types."
-       | LtOp | LeOp | GtOp | GeOp ->
-         let { exp=_; ty } = expty_left in
-         if T.is_int ty || T.is_string ty then
-           return_int ()
-         else
-           failwith "invalid operation types."
-      )
-    | SeqExp [] ->
-      return_unit ()
-    | SeqExp exps ->
-      exps
-      |> List.map (fun (exp, _) -> trexp exp)
-      |> List.rev
-      |> List.hd
-    | RecordExp { fields; typ; pos } ->
-      begin
-        match Sym.look tenv typ with
-        | Some x ->
-          begin
-            match x with
-            | T.RECORD (f, _) ->
-              let rec_formal : (S.t * S.t) list = f () in
-              let rec get_field_typename name = function
-                  [] -> Types.BOTTOM
-                | (sym, exp, pos) :: l ->
-                  if String.compare name (S.name sym) = 0
-                  then (trexp exp).ty
-                  else get_field_typename name l
-              in
-              let check_formal sym ty =
-                if not (Types.leq (get_field_typename (S.name sym) fields) ty)
-                then failwith ("actual type doesn't mach formal type: " ^ (S.name sym))
-                else ()
-              in
-              let iterator (fieldname, typeid) =
-                match S.look tenv typeid with
-                | Some x -> check_formal fieldname x; ()
-                | None -> failwith ("unknown type in record: " ^ S.name typ)
-              in
-              if List.length rec_formal <> List.length fields
-              then failwith ("record list is wrong length: " ^ S.name typ)
-              else
-                rec_formal |> List.iter (fun (fieldname, typeid) ->
-                  iterator (fieldname, typeid)
-                ); return_unit ()
-            | _ -> failwith ("expected record type, not :" ^ Sym.name typ)
-          end
-        | None -> failwith ("expected record type, not :" ^ Sym.name typ)
-      end
-    | AssignExp { var; exp; pos } ->
-      let rec get_var_symbol = function
-        | SimpleVar { symbol; _ } -> S.look venv symbol
-        | FieldVar { var; _; } -> get_var_symbol var
-        | SubScriptVar { var; _; } -> get_var_symbol var
-      in
-      let can_assign var' =
-        match get_var_symbol var' with
-        | Some (Env.VarEntry { ty; read_only }) ->
-          if read_only
-          then failwith "error: index variable erroneously assigned to"
-          else ()
-        | _ -> failwith "cannot assign to a function"
-      in
-      can_assign var;
-      return_unit ()
-    | CallExp { func; args; pos } ->
-      (match S.look venv func with
-       | Some (Env.VarEntry { ty; read_only }) ->
-         failwith @@ Printf.sprintf "expected funciton, but found variable %s" (S.name func)
-       | Some (Env.FunEntry { formals; result }) ->
-         List.iter2 (fun t_arg ty_formal ->
-             let { exp; ty } = trexp t_arg in
-             if ty <> ty_formal
-             then failwith @@ Printf.sprintf "Unmatched type: %s %s" (T.show_ty ty) (T.show_ty ty_formal)
-           ) args formals;
-         return_unit ()
-       | None -> failwith @@ "Cannot find function " ^ (S.name func)
-      )
-    | IfExp { test; then'; else'; pos } ->
-      check_int (trexp test) pos;
-      let { exp=_; ty=ty_then } = trexp then' in
-      (match else' with
-       | None -> return ty_then
-       | Some else' ->
-         let {exp=_; ty=ty_else } = trexp else' in
-         if ty_then <> ty_else then failwith "the types of then and else are not same"
-         else return ty_then)
-    | WhileExp { test; body; pos } ->
-      check_int (trexp test) pos;
-      check_unit (trexp body) pos;
-      return_unit ()
-    | ForExp { var; escape; lo; hi; body; pos } ->
-      check_int (trexp lo) pos;
-      check_int (trexp hi) pos;
-      check_unit (trexp body) pos;
-      return_unit ()
-    | BreakExp _ -> return_unit ()
-    | ArrayExp { typ; size; init; pos } ->
-      (match S.look tenv typ with
-       | Some x ->
-         (match actual_ty x ~pos with
-          | T.ARRAY (ty, unique) ->
-            check_int (trexp size) pos;
-            check_same_ty (trexp init).ty (actual_ty ty ~pos) "Not same type in array createion";
-            return (T.ARRAY (ty, unique))
-          | _ -> failwith "Not of ARRAY type in array creaation")
-       | None -> failwith "No such type")
-    | LetExp { decs; body; pos } ->
-      let cur_depth = !nest_depth in
-      set_nest_depth 0;
-      let {venv=venv'; tenv=tenv'} = trans_dec venv tenv decs in
-      set_nest_depth cur_depth;
-      trans_exp venv' tenv' body
-  and trvar var =
-    match var with
-    | SimpleVar { symbol; pos } ->
-      (match S.look venv symbol with
-       | Some (Env.VarEntry { ty; read_only }) -> return ty
-       | Some (Env.FunEntry { formals; result }) -> return result
-       | None -> failwith @@ "error: undeclared variable " ^ (S.name symbol))
-    | FieldVar { var; symbol; pos } ->
-      (match trvar var with
-        | { exp=(); ty=T.RECORD (recgen, unique) } ->
-          let fields = recgen () in
-          let rec get_field_type fields id pos =
-            match fields with
-            | (fsym, fty) :: l ->
-              if String.compare (S.name fsym) (S.name id) = 0
-              then
-                match S.look tenv fty with
-                | Some ty -> ty
-                | None -> failwith "type error in record"
-              else get_field_type l id pos
-            | [] -> failwith "no such field"
-          in return (get_field_type fields symbol pos)
-        | { exp; ty; } -> failwith "error : variable not record")
-    | SubScriptVar { var; exp; pos } ->
-      (match trvar var with
-       | {exp=(); ty=T.ARRAY (arr_ty, unique)} ->
-         check_int (trexp exp) pos; return (actual_ty arr_ty ~pos)
-       | {exp; ty} -> failwith "requires array"
-      )
-  in trexp exp
+let rec actualTy ty pos = match ty with
+  T.NAME (sym, reference) -> (match !reference with
+    Some resolved -> actualTy resolved pos
+  | None -> 
+    let _ = error pos ("The type \"" ^ (S.name sym) ^ "\" has still not been resolved.") in
+    raise SemanticError
+  )
+| _ -> ty
 
-and check_int { exp; ty } pos =
-  match ty with
-  | Types.INT -> ()
-  | _ -> failwith "integer required."
+let checkInt ({ty; _}, pos) = actualTy ty pos = T.INT
 
-and check_unit { exp; ty } pos =
-  match ty with
-  | T.UNIT -> ()
-  | _ -> failwith "unit required."
+let getValue venv sym pos = match S.look (venv, sym) with
+  Some value -> value
+| None ->
+  let _ = error pos ("The value \"" ^ (S.name sym) ^ "\" is undefined.") in
+  raise SemanticError
 
-and check_same { exp=exp1; ty=ty1 } { exp=exp2; ty=ty2 } pos =
-  if ty1 == ty2 then () else failwith "same types are required."
+let getType tenv sym pos = match S.look (tenv, sym) with
+  Some typ -> typ
+| None ->
+  let _ = error pos ("The type \"" ^ (S.name sym) ^ "\" is undefined.") in
+  raise SemanticError
 
-and check_same_ty ty1 ty2 msg =
-  if T.leq ty1 ty2 then () else failwith msg
+let getActualType tenv sym pos =
+  actualTy (getType tenv sym pos) pos
 
-and return_unit () = { exp=(); ty=Types.UNIT }
+let checkTy expected actual = match expected with
+  T.RECORD _ -> expected == actual || actual = T.NIL
+| _ -> expected == actual
 
-and return_nil () = { exp=(); ty=Types.NIL }
+let isConst venv var pos = match var with 
+  A.SimpleVar (sym, _) -> (match getValue venv sym pos with
+    Env.VarEntry {const;_} -> const
+  | _ -> false)  
+| _ -> false
 
-and return_int () = { exp=(); ty=Types.INT }
+let rec contains lst el = match lst with
+  [] -> false
+| hd::tl -> el=hd || contains tl el
 
-and return_string () = { exp=(); ty=Types.STRING }
 
-and return (ty : T.ty) = { exp=(); ty=ty }
+let loop_depth = ref 0
 
-and trans_dec venv tenv decs : transdecty =
-  let rec trdec {venv; tenv} dec =
-    match dec with
-    | A.VarDec { name; escape; typ; init; pos } ->
-      let get_types = function
-          Some ty -> ty
-        | None -> T.BOTTOM
-      in
-      let rec actual_ty ty =
-        match ty with
-        | T.NAME (symbol, ty) ->
-          actual_ty (get_types (S.look tenv name))
-        | some_ty -> some_ty
-      in
-      (match typ with
-       | Some (symbol, pos) ->
-         begin
-           match S.look tenv symbol with
-           | Some ty ->
-             check_type_assignable (actual_ty ty) ty pos "erro : mismatched types in vardec";
-             { venv=S.enter venv name (Env.VarEntry { ty=actual_ty ty; read_only=false})
-             ; tenv=tenv
-             }
-           | None ->
-             failwith "type not recognized"
-         end
-       | None ->
-         let { exp; ty } = trans_exp venv tenv init in
-         (if T.leq ty T.NIL
-          then failwith "error: initializing nil expressions not constrained by record type"
-          else ());
-         { venv=S.enter venv name (Env.VarEntry { ty=ty; read_only=false })
-         ; tenv=tenv
-         })
-    | A.TypeDec tydecs ->
-      (* let make_temp_tydec tenv A.{name; ty; pos} = S.enter tenv name T.BOTTOM in *)
-      (* let temp_tenv = List.fold_left make_temp_tydec tenv tydecs in *)
-      let fold_tydec {venv; tenv} A.{name; ty; pos} = { venv=venv; tenv=S.enter tenv name (trans_ty tenv ty) } in
-      let new_env = List.fold_left fold_tydec {venv; tenv} tydecs in
+(* main typechecking functions *)
 
-      let check_illegal_cycle () A.{name; ty; pos} =
-        let rec check_helper seen name =
-          match S.look new_env.tenv name with
-          | Some (T.NAME (sym, _)) ->
-            if List.exists (fun y -> String.compare (S.name sym) (S.name y) = 0) seen
-            then failwith "error: mutally recursive types that do not pass through record or array"
-            else check_helper (name :: seen) name
-          | _ -> ()
-        in check_helper [] name
-      in
+(*  venv * tenv * Absyn.exp -> expty  *)
+let rec transExp (venv, tenv, exp) =
+  let rec trexp = function
+    A.VarExp var -> transVar (venv, tenv, var)
 
-      let check_duplicates seen A.{name; ty; pos} =
-        if List.exists (fun y -> String.compare (S.name name) y = 0) seen
-        then failwith "error: two types of same name in mutually recursive tydec"
-        else (S.name name) :: seen
-      in
+  | A.NilExp -> et () T.NIL
 
-      List.fold_left check_duplicates [] tydecs |> ignore;
-      List.fold_left check_illegal_cycle () tydecs;
-      new_env
-    | A.FunctionDec fundecs ->
-      let trans_rt rt =
-        match S.look tenv rt with
-        | Some rt -> rt
-        | None -> failwith @@ "return type unrecognized " ^ (S.name rt)
-      in
-      let trans_param (A.Field { name; escape; typ; pos }) =
-        match S.look tenv typ with
-        | Some t -> (name, t)
-        | None -> failwith @@ "Parameter type unrecognized " ^ (S.name typ)
-      in
-      let enter_funcs A.{ name; params; result; body; pos } venv =
-        match result with
-        | Some (rt, pos') ->
-          S.enter venv name
-            E.(FunEntry {formals=List.map (fun param -> snd (trans_param param)) params; result=trans_rt rt})
-        | None ->
-          S.enter venv name
-            E.(FunEntry {formals=List.map (fun param -> snd (trans_param param)) params; result=T.UNIT})
-      in
-      let venv' = List.fold_right enter_funcs fundecs venv in
-      let check_fundec A.{ name; params; body; pos; result } =
-        let result_ty = match result with Some (rt, pos') -> trans_rt rt | None -> T.UNIT in
-        let params' = List.map trans_param params in
-        let enter_param venv (name, ty) = S.enter venv name (E.VarEntry {ty=ty; read_only=false}) in
-        let venv'' = List.fold_left enter_param venv' params' in
-        let body' = trans_exp venv'' tenv body in
-        Printf.eprintf "body type : %s, result type : %s\n " (body'.ty |> T.show_ty) (result_ty |> T.show_ty);
-        if not (T.leq body'.ty result_ty)
-        then failwith @@ "Function body type doesn't match return type in function " ^ (S.name name)
-      in
-      let fold_fundec fundec _ = check_fundec fundec in
-      let check_duplicates seen A.{name; _} =
-        if List.exists (fun y -> String.compare (S.name name) y = 0) seen then
-          failwith @@ "error : two types of same name in mutually recursive fundec"
+  | A.IntExp _ -> et () T.INT
+
+  | A.StringExp (_, _) -> et () T.STRING
+
+  | A.CallExp {func; args; pos} ->
+    let funcName = quote (S.name func) in
+    (* ensure func is a function *)
+    let formals, result = match getValue venv func pos with
+      Env.FunEntry {formals; result} -> formals, result
+    | _ -> 
+      let _ = error pos (funcName ^ " is not a function.") in
+      raise SemanticError
+    in
+    (* ensure the arguments are of the correct type and number *)
+    let rec checkParams params arguments i = match params, arguments with
+      [], [] -> ()
+    | _, [] -> error pos ("Not enough arguments supplied to " ^ funcName ^ ".")
+    | [], _ -> error pos ("Too many arguments supplied to " ^ funcName ^ ".")
+    | paramHd::paramTl, argHd::argTl ->
+      let {ty=argTy; _} = trexp argHd in
+      let actualParamHd = actualTy paramHd pos in
+      if not (checkTy actualParamHd argTy) then
+        error pos ("Type of argument " ^ (string_of_int i)
+          ^ " to function call " ^ funcName ^ " should be "
+          ^ (tyStr actualParamHd) ^ " (" ^ (tyStr argTy) ^ " found).")
+      else checkParams paramTl argTl (i+1)
+    in
+    let _ = checkParams formals args 1 in
+    let _ = checkErr () in
+    et () (actualTy result pos)
+
+  | A.OpExp {left; oper; right; pos} ->
+    let op = quote (opStr oper) in
+    let isStringOp, isRecArrOp = match oper with
+      A.EqOp | A.NeqOp -> true, true
+    | A.LtOp | A.LeOp | A.GtOp | A.GeOp -> true, false
+    | _ -> false, false
+    in
+    let isIntOnlyOp = not isStringOp in
+    let {ty=lty;_} as lexpty = trexp left in
+    let {ty=rty;_} as rexpty = trexp right in 
+    let lTyStr = tyStr lty in
+    let rTyStr = tyStr rty in
+    let _ = if isIntOnlyOp then
+      match (checkInt (lexpty, pos)), (checkInt (rexpty, pos)) with
+        false, false -> error pos ("Both operands to " ^ op ^ " are not integers.")
+      | false, true -> error pos ("Left operand to " ^ op ^ " is not an integer.")
+      | true, false -> error pos ("Right operand to " ^ op ^ " is not an integer.")
+      | _ -> ()
+    else if (not (checkTy lty rty)) && (not (checkTy rty lty)) then
+      error pos ("Types of operands to " ^ op ^ " do not match. The left operand is "
+      ^ lTyStr ^ "; the right is " ^ rTyStr ^ ".")
+    else (* types are the same, verify that ops are valid for types *)
+      match lty with
+        T.INT -> ()
+      | T.STRING -> if not isStringOp then
+          error pos ("Cannot apply " ^ op ^ " to string operands.")
+      | _ -> if not isRecArrOp then
+          error pos ("Cannot apply " ^ op ^ " to record/string operands.")
+    in
+    let _ = checkErr () in
+    et () T.INT
+
+  | A.RecordExp {fields; typ; pos} ->
+    let typeName = S.name typ in
+    (* ensure typ is a record type *)
+    let ty, formalFields = match getActualType tenv typ pos with
+      T.RECORD (lst, _) as ty -> ty, lst
+    | _ ->
+      let _ = error pos (typeName ^ " is not a record type.") in
+      raise SemanticError
+    in
+    (* ensure each field is instantiated with the right type, in the right order *)
+    let rec checkFields formals actuals = match formals, actuals with
+      [], [] -> ()
+    | (sym, _)::_, [] -> error pos ("Missing field " ^ (quote (S.name sym))
+        ^ " in " ^ typeName ^ " instantiation.")
+    | [], (sym,_,_)::_ -> error pos ("Unknown field " ^ (quote (S.name sym))
+        ^ " in " ^ typeName ^ " instantiation.")
+    | (fsym, fty)::ftl, (asym, exp, _)::atl ->
+      let actualFty = actualTy fty pos in
+      let fname = quote (S.name fsym) in
+      let aname = quote (S.name asym) in  
+      if fsym <> asym then
+        error pos ("Expected field " ^ fname ^ ", but found "
+         ^ aname ^ " in " ^ typeName ^ " instantiation.")
+      else
+        let {ty=aty; _} = trexp exp in
+        if not (checkTy actualFty aty) then
+          let ftystr = tyStr actualFty in
+          let atystr = tyStr aty in
+          error pos ("Value of " ^ fname ^ " should be " ^ ftystr
+          ^ ", but found " ^ atystr ^ " in " ^ typeName ^ " instantiation.")
         else
-          (S.name name) :: seen
-      in
-      List.fold_left check_duplicates [] fundecs |> ignore;
-      List.fold_right fold_fundec fundecs ();
-      {venv=venv'; tenv=tenv}
-  and fold_dec {venv; tenv} dec = trdec {venv; tenv} dec in
-  List.fold_left fold_dec {venv=venv; tenv=tenv} decs
+          checkFields ftl atl
+    in
+    let _ = checkFields formalFields fields in
+    let _ = checkErr () in
+    et () ty
 
-(* tenv -> Absyn.ty -> Types.ty *)
-and trans_ty tenv ty =
-  let rec trty tenv = function
-    | A.NameTy { symbol; _ } ->
-      (match S.look tenv symbol with
-       | Some _ -> T.NAME (symbol, ref None)
-       | None ->  failwith @@ "unrecognized name type: " ^ S.name symbol
-      )
-    | A.RecordTy fields ->
-      let field_process (A.Field { name; escape; typ; pos }) =
-        match S.look tenv name with
-        | Some _ -> (name, typ)
-        | None -> failwith @@ "undefined type in rec: " ^ S.name typ
-      in
-      let rec rec_gen () = List.fold_left (fun acc field -> field_process field :: acc) [] fields in
-      T.RECORD (rec_gen, ref ())
-    | A.ArrayTy { symbol; pos } ->
-      T.ARRAY (trans_ty tenv (A.NameTy { symbol; pos }), ref ())
-  in trty tenv ty
+  | A.SeqExp lst ->
+    let fst = fun (x,_) -> x in
+    let exps = List.map fst lst in
+    (* typecheck each expression, and yield the last one's result *)
+    let combine _ next = trexp next in
+    List.fold_left combine (et () T.UNIT) exps
 
-let trans_prog : A.exp -> unit = fun exp ->
-  let {exp=_; ty=_} = trans_exp E.base_venc E.base_tenv exp in
+  | A.AssignExp {var; exp; pos} ->
+
+    let {ty=varTy; _} = transVar (venv, tenv, var) in
+    let {ty=expTy; _} = trexp exp in
+    let varTyStr = tyStr varTy in
+    let expTyStr = tyStr expTy in
+    if isConst venv var pos then
+      let _ = error pos ("Cannot reassign a constant variable.") in
+      raise SemanticError
+    else if not (checkTy varTy expTy) then
+      let _ =
+        error pos ("Cannot assign a value of type " ^ expTyStr ^ " to an lvalue of type " ^ varTyStr ^ ".")
+      in
+      raise SemanticError
+    else
+      et () T.UNIT
+
+  | A.IfExp {test; then'; else'; pos} ->
+    let {ty=testTy; _} as testExpTy = trexp test in
+    let {ty=thenTy; _} = trexp then' in
+    let testTyStr = tyStr testTy in
+    let thenTyStr = tyStr thenTy in
+    let _ = if not (checkInt (testExpTy, pos)) then
+      error pos ("Condition in if-expression should have type int, not " ^ testTyStr)
+    in
+    let _ = match else' with
+      Some exp ->
+        let {ty=elseTy; _} = trexp exp in
+        let elseTyStr = tyStr elseTy in
+        if (not (checkTy thenTy elseTy)) && (not (checkTy elseTy thenTy)) then
+          error pos ("Types of then- and else-branches differ. "
+          ^ "Then-branch has type " ^ thenTyStr ^ "; "
+          ^ "else-branch has type " ^ elseTyStr ^ ".")
+    | None ->
+        if thenTy <> T.UNIT then
+          error pos ("The body of an if-expression with no else-branch should be unit, not " ^
+          thenTyStr)
+    in
+    let _ = checkErr () in
+    et () thenTy
+
+  | A.WhileExp {test; body; pos} ->
+    let {ty=testTy; _} as testExpTy = trexp test in
+    let _ = loop_depth:= !loop_depth + 1 in
+    let {ty=bodyTy; _} = trexp body in
+    let _ = loop_depth:= !loop_depth - 1 in
+    let testTyStr = tyStr testTy in
+    let bodyTyStr = tyStr bodyTy in
+    let _ = if not (checkInt (testExpTy, pos)) then
+      error pos ("Condition in while loop should have type int, not " ^ testTyStr)
+    in
+    let _ = if bodyTy <> T.UNIT then
+      error pos ("Body of while loop should have a unit return type, not " ^ bodyTyStr)
+    in
+    let _ = checkErr () in
+    et () T.UNIT
+
+  | A.ForExp {var; lo; hi; body; pos; _} ->
+    let {ty=loTy; _} as loExpTy = trexp lo in
+    let {ty=hiTy; _} as hiExpTy = trexp hi in
+    let loTyStr = tyStr loTy in
+    let hiTyStr = tyStr hiTy in
+    let venv' = S.enter (venv, var, Env.VarEntry {ty=T.INT; const=true}) in
+    let _ = if not (checkInt (loExpTy, pos)) then
+      error pos ("For loop lower bound should have type int, not " ^ loTyStr ^ ".")
+    in
+    let _ = if not (checkInt (hiExpTy, pos)) then
+      error pos ("For loop upper bound should have type int, not " ^ hiTyStr ^ ".")
+    in
+    let _ = loop_depth:= !loop_depth + 1 in
+    let {ty=bodyTy; _} = transExp (venv', tenv, body) in
+    let _ = loop_depth:= !loop_depth - 1 in
+    let bodyTyStr = tyStr bodyTy in
+    let _ = if bodyTy <> T.UNIT then
+      error pos ("Body of for loop should have a unit return type, not " ^ bodyTyStr ^ ".")
+    in
+    let _ = checkErr () in
+    et () T.UNIT
+
+  | A.BreakExp pos -> if (!loop_depth) <= 0 then 
+      let _ = error pos "Break statement used outside of a loop." in
+      raise SemanticError
+    else et () T.UNIT
+
+  | A.LetExp {decs; body; pos} ->
+    let combine {venv; tenv} dec = transDec (venv, tenv, dec) in
+    let {venv=venv'; tenv=tenv'} = List.fold_left combine {venv=venv; tenv=tenv} decs in
+    let _ = checkErr () in
+    let {ty=bodyTy; _} = transExp (venv', tenv', body) in
+    let _ = checkErr () in
+    et () bodyTy
+
+  | A.ArrayExp {typ; size; init; pos} ->
+    let typeName = S.name typ in
+    (* ensure typ is an array type *)
+    let ty, arrTy = match getActualType tenv typ pos with
+      T.ARRAY (arrTy, _) as ty -> ty, actualTy arrTy pos
+    | _ ->
+      let _ = error pos (typeName ^ " is not an array type.") in
+      raise SemanticError
+    in
+    let arrTyStr = tyStr arrTy in
+    let {ty=sizeTy; _} as sizeExpTy = trexp size in
+    let {ty=initTy; _} = trexp init in
+    let sizeTyStr = tyStr sizeTy in
+    let initTyStr = tyStr initTy in
+    (* ensure size has type int *)
+    let _ = if not (checkInt (sizeExpTy, pos)) then
+      error pos ("Size of array should have type int, not " ^ sizeTyStr ^ ".")
+    in
+    (* ensure initializing value has the correct type *)
+    let _ = if not (checkTy arrTy initTy) then
+      error pos ("Initializing value for array should have type " ^ arrTyStr
+      ^ ", not " ^ initTyStr ^ ".")
+    in
+    let _ = checkErr () in
+    et () ty
+  in
+  trexp exp
+
+(*  venv * tenv * Absyn.var -> expty  *)
+and transVar (venv, tenv, var) = match var with
+  A.SimpleVar (sym, pos) ->
+  let varStr = S.name sym in
+  let ty = match getValue venv sym pos with
+    Env.VarEntry {ty; _} -> actualTy ty pos
+  | _ ->
+    let _ = error pos ("Function " ^ varStr ^ " is being used as a variable.") in
+    raise SemanticError
+  in
+  et () ty
+
+| A.FieldVar (recVar, sym, pos) ->
+  let fieldStr = quote (S.name sym) in
+  (* ensure that the lvalue is a record type *)
+  let {ty=recTy; _} = transVar (venv, tenv, recVar) in
+  let fieldList = match recTy with
+    T.RECORD (lst, _) -> lst
+  | _ ->
+    let _ = error pos ("Cannot access field " ^ fieldStr ^ " on a non-record type.") in
+    raise SemanticError
+  in
+  let rec findField field = function
+    [] -> 
+      let _ = error pos ("Unknown field " ^ fieldStr ^ ".") in
+      raise SemanticError
+  | (fieldSym, fieldTy)::fieldTl ->
+      if fieldSym = field then
+        et () (actualTy fieldTy pos)
+      else
+        findField field fieldTl
+  in
+  findField sym fieldList
+
+| A.SubscriptVar (arrVar, exp, pos) ->
+  let {ty=arrTy; _} = transVar (venv, tenv, arrVar) in
+  let resultTy = match arrTy with
+    T.ARRAY (ty, _) -> actualTy ty pos
+  | _ ->
+    let _ = error pos ("Cannot take subscript of a non-array type.") in
+    raise SemanticError
+  in
+  let {ty=expTy; _} as expExpTy = transExp (venv, tenv, exp) in
+  let expTyStr = tyStr expTy in
+  let _ = if not (checkInt (expExpTy, pos)) then
+    error pos ("Subscript of array should have type int, not " ^ expTyStr ^ ".")
+  in
+  let _ = checkErr () in
+  et () resultTy
+
+(*  venv * tenv * Absyn.dec -> {venv: venv; tenv: tenv}  *)
+and transDec (venv, tenv, dec) = match dec with
+  A.VarDec {name; typ; init; pos; _} ->
+  let {ty=initTy; _} = transExp (venv, tenv, init) in
+  let initTyStr = tyStr initTy in
+  let _ = match typ with
+    Some (sym, pos) ->
+      let declTy = getActualType tenv sym pos in
+      let declTyStr = tyStr declTy in
+      if not (checkTy declTy initTy) then
+        error pos ("Declared type for " ^ (quote (S.name name))
+          ^ " (" ^ declTyStr ^ ") differs from the initializing type ("
+          ^ initTyStr ^ ").")
+  | None -> if initTy = T.NIL then
+      error pos "Cannot initialize variable to nil without an explicit type declaration."
+  in
+  let _ = checkErr () in
+  {venv=S.enter (venv, name, Env.VarEntry {ty=initTy; const=false}); tenv=tenv}
+
+| A.FunctionDec lst ->
+  (* create new value environment *)
+  let getFieldType ({typ; pos; _} : A.field) = getActualType tenv typ pos in
+  let enterFunctionNames (seen, venv) ({name; params; result; pos} : A.fundec) =
+    if contains seen name then
+      let nameStr = quote (S.name name) in
+      let _ = error pos ("Function " ^ nameStr ^ " was defined multiple times in a sequence of adjacent function declarations.") in
+      raise SemanticError
+    else 
+      let formals = List.map getFieldType params in
+      let resultTy = match result with
+        Some (sym, pos) -> getActualType tenv sym pos
+      | None -> T.UNIT
+      in
+      (name :: seen), S.enter (venv, name, (Env.FunEntry {formals=formals; result=resultTy}))
+  in
+  let (_, venv') = List.fold_left enterFunctionNames ([], venv) lst in
+  (* then, typecheck each individual function *)
+  let typecheckFunc ({name; params; body; pos; _} : A.fundec) =
+    let funcName = quote (S.name name) in
+    let resultTy = match getValue venv' name pos with
+      Env.FunEntry {result; _} -> result
+    | _ -> ErrorMsg.impossible (funcName ^ " is not a function entry while typechecking function bodies.")
+    in
+    let enterParams venv ({name; typ; _} : A.field) =
+      let paramTy = getActualType tenv typ pos in
+      S.enter (venv, name, (Env.VarEntry {ty=paramTy; const=true}))
+    in
+    (* create value environment inside function *)
+    let venv'' = List.fold_left enterParams venv' params in
+    let {ty=bodyTy; _} = transExp (venv'', tenv, body) in
+    if not (checkTy resultTy bodyTy) then
+      let resultTyStr = tyStr resultTy in
+      let bodyTyStr = tyStr bodyTy in
+      let _ = error pos ("Function " ^ funcName ^ " should have result type "
+        ^ resultTyStr ^ ", but its body has type " ^ bodyTyStr ^ ".") in
+      raise SemanticError
+  in
+  let _ = List.map typecheckFunc lst in
+  {venv=venv'; tenv=tenv}
+
+| A.TypeDec lst ->
+  (* create new type environment with name types *)
+  let enterTypeNames (seen, tenv) ({name; pos; _} : A.typedec) =
+    if contains seen name then
+      let nameStr = S.name name in
+      let _ = error pos ("Type " ^ nameStr ^ " was defined multiple times in a sequence of adjacent type declarations.") in
+      raise SemanticError
+    else
+      (name :: seen), S.enter (tenv, name, (T.NAME (name, ref None)))
+  in
+  let (_, tenv') = List.fold_left enterTypeNames ([], tenv) lst in
+  let resolveTypes ({name; ty; pos} : A.typedec) =
+    let nameStr = S.name name in
+    let resolved = transTy (tenv', ty) in
+    let reference = match getType tenv' name pos with
+      T.NAME (_, reference) -> reference
+    | _ -> ErrorMsg.impossible (nameStr ^ " is not a NAME entry while typechecking type declarations.")
+    in
+    reference := Some resolved
+  in
+  (* resolve each type *)
+  let _ = List.map resolveTypes lst in
+  (* detect cycles *)
+  let detectCycle ({name; pos; _} : A.typedec) =
+    let ty = getType tenv' name pos in
+    let rec detect seen ty = match ty with
+      T.NAME (sym, nextTy) ->
+        if contains seen sym then
+          let _ = error pos ("Cycle detected in type declarations for type " ^ (S.name sym) ^ ".") in
+          raise SemanticError
+        else
+          let unboxedTy = match !nextTy with
+            Some x -> x
+          | None -> ErrorMsg.impossible ("Type " ^ (S.name sym) ^ " was never resolved.")
+          in
+          detect (sym :: seen) unboxedTy
+    | _ -> ()
+    in
+    let _ = detect [] ty in
+    checkErr ()
+  in
+  let _ = List.map detectCycle lst in
+  {venv=venv; tenv=tenv'}
+
+(*  tenv * Absyn.ty -> Types.ty  *)
+and transTy (tenv, ty) = match ty with
+  A.NameTy (sym, pos) -> getType tenv sym pos
+
+| A.RecordTy lst ->
+  let combine ({name; typ=fieldTySym; pos; _} : A.field) fields =
+    let fieldTy = getType tenv fieldTySym pos in
+    (name, fieldTy) :: fields
+  in
+  let fieldList = List.fold_right combine lst [] in
+  T.RECORD (fieldList, ref ())
+
+| A.ArrayTy (sym, pos) ->
+  let ty = getType tenv sym pos in
+  T.ARRAY (ty, ref ())
+
+let transProg ast =
+  let _ = transExp (Env.base_venv, Env.base_tenv, ast) in
   ()

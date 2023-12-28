@@ -5,6 +5,7 @@
  (name main)
  (public_name tigerml)
  (modules :standard)
+ (modules_without_implementation translate)
  (preprocess (pps ppx_deriving.show)))
 
 (env
