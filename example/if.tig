@@ -1,2 +1,0 @@
-/* if ! then _ else _ => JUMP not CJUMP */
-if 1 then 3 else 4
