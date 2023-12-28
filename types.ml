@@ -1,4 +1,5 @@
 type unique = unit ref
+[@@deriving show]
 
 type ty = INT
         | STRING
@@ -7,3 +8,4 @@ type ty = INT
         | NIL
         | UNIT
         | NAME of Symbol.symbol * ty option ref
+[@@deriving show]

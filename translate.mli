@@ -1,6 +1,9 @@
 type exp
 type level
+[@@deriving show]
+
 type access (* not the same as Frame.access *)
+[@@deriving show]
 
 type newLevelParams = { parent : level; name : Temp.label; formals : bool list }
 
@@ -37,6 +40,3 @@ val breakExp : Temp.label -> exp
 val seqExp : exp list -> exp
 val intExp : int -> exp
 val procEntryExit : exp * level -> unit
-
-(* ppx_deriving.show *)
-val show_exp : exp -> string

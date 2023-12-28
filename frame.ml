@@ -1,6 +1,9 @@
 module type FRAME = sig
   type access
+  [@@deriving show]
+
   type frame
+  [@@deriving show]
 
   type newFrameParams = { name: Temp.label; formals : bool list }
 
@@ -29,8 +32,10 @@ end
 module RiscVFrame : FRAME = struct
   type access = InFrame of int
               | InReg of Temp.temp
+  [@@deriving show]
 
   type frame = { name : Temp.label; formals : access list; locals : int ref }
+  [@@deriving show]
 
   type newFrameParams = { name : Temp.label; formals : bool list }
 

@@ -9,8 +9,11 @@ type exp = Ex of T.exp
 [@@deriving show]
 
 type level = { parent : level option; frame : Frame.frame; unique : unit ref; }
+[@@deriving show]
 
 type access = level * Frame.access
+[@@deriving show]
+
 type newLevelParams = { parent : level; name : Temp.label; formals : bool list }
 
 let outermost =
