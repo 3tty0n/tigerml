@@ -30,7 +30,7 @@ module type FRAME = sig
   val procEntryExit1 : frame * Tree.stm -> Tree.stm
 end
 
-module RiscVFrame : FRAME = struct
+module RISCVFrame : FRAME = struct
   type access = InFrame of int
               | InReg of Temp.temp
   [@@deriving show]
@@ -84,4 +84,4 @@ module RiscVFrame : FRAME = struct
 
 end
 
-module Frame : FRAME = RiscVFrame
+module Frame : FRAME = RISCVFrame

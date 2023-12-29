@@ -1,3 +1,4 @@
+open Tiger
 open Frame
 
 let canonize stm =

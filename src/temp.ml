@@ -25,3 +25,5 @@ let newlabel () =
   Symbol.symbol ("L" ^ (string_of_int n))
 
 let namedlabel = Symbol.symbol
+
+let string_of_label label = Symbol.name label

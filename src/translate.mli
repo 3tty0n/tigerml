@@ -1,6 +1,5 @@
-type exp
-type level
-[@@deriving show]
+type exp [@@deriving show]
+type level [@@deriving show]
 
 type access (* not the same as Frame.access *)
 [@@deriving show]

@@ -1,11 +1,9 @@
-type temp
+type temp [@@deriving show]
 val newtemp: unit -> temp
 module Table: Table.S with type key=temp
 val makestring: temp -> string
 
-type label = Symbol.symbol
+type label = Symbol.symbol [@@deriving show]
 val newlabel: unit -> label
 val namedlabel: string -> label
-
-val pp_temp : Format.formatter -> temp -> unit
-val pp_label : Format.formatter -> label -> unit
+val string_of_label : label -> string

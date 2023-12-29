@@ -9,4 +9,16 @@ let parse filename =
     with Parsing.Parse_error ->
       ErrorMsg.error (-1) "Failed to parse file.";
       exit 1
-  end;
+  end
+
+let parse_string str =
+  let lexbuf = Lexing.from_string str in
+  ErrorMsg.fileName := "<string>";
+  begin
+    try
+      let ast = Parser.program Lexer.tokenize lexbuf in
+      if !ErrorMsg.anyErrors then exit 1 else ast
+    with Parsing.Parse_error ->
+      ErrorMsg.error (-1) "Failed to parse file.";
+      exit 1
+  end

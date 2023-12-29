@@ -4,9 +4,17 @@
 (executable
  (name main)
  (public_name tigerml)
- (modules :standard)
- (libraries core)
+ (modules main)
+ (libraries core str tiger)
  (preprocess (pps ppx_deriving.show ppx_sexp_conv ppx_compare)))
+
+(library
+ (name tiger)
+ (modules :standard \ main)
+ (inline_tests)
+ (libraries core str)
+ (preprocess (pps ppx_inline_test ppx_deriving.show ppx_sexp_conv ppx_compare))
+ )
 
 (env
  (dev

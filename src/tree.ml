@@ -14,7 +14,7 @@ type exp =
 
 and stm =
   (* MOVE (TEMP t, e) Evaluate e and move the result to temporary *)
-  (* MOVE (MEM e1, e2). Evaluate e and results in address a. Then evaluated e2 and
+  (* MOVE (MEM e1, e2). Evaluate e1 and results in address a. Then evaluated e2 and
      store its result into wordSize bytes of memory starting at a. *)
   | MOVE of exp * exp
   (* Evaluates the expression and discards the result *)
