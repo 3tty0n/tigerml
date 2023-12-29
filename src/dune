@@ -5,6 +5,7 @@
  (name main)
  (public_name tigerml)
  (modules :standard)
+ (libraries core)
  (preprocess (pps ppx_deriving.show ppx_sexp_conv ppx_compare)))
 
 (env
