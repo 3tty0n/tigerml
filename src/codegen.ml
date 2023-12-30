@@ -9,7 +9,7 @@ end
 module RistVGen : CODEGEN = struct
   let codegen frame stm =
     let ir_list : A.instr list ref = ref [] in
-    let emit instr = ir_list := !ir_list @ [ instr ] in
+    let emit instr = ir_list := instr :: !ir_list in
 
     let result gen =
       let t = Temp.newtemp () in
@@ -76,6 +76,7 @@ module RistVGen : CODEGEN = struct
                  src = munch_exp e2;
                  dst = i;
                })
+      | T.MOVE (_, _) -> ErrorMsg.impossible "Impossible MOVE"
       | T.LABEL lab ->
           emit
             (A.LABEL
@@ -89,14 +90,40 @@ module RistVGen : CODEGEN = struct
               emit
                 (A.OPER
                    {
-                     assem = "\tj 'j0";
+                     assem = "\tj 'j0\n";
                      src = [];
                      dst = [];
                      jump = Some [ label ];
                    })
           | _ -> ErrorMsg.impossible "Impossible to jump to a non-label.")
       | T.EXP exp -> ignore (munch_exp exp)
-      | stm -> ErrorMsg.impossible @@ "Unmatched pattern " ^ Tree.show_stm stm
+      | T.CJUMP (op, e1, e2, t_label, f_label) ->
+        let op' = match op with
+          | T.EQ -> "beq"
+          | T.NE -> "bne"
+          | T.LT | T.LE -> "blt"
+          | T.GT | T.GE -> "bgt"
+        in
+        let e1_tmp = munch_exp e1 in
+        let e2_tmp = munch_exp e2 in
+        if op = T.LE || op = T.GE then
+          emit (
+            A.OPER {
+              assem = "\taddi, 's0, 's0, 1";
+              src = [ e2_tmp ];
+              dst = [];
+              jump = None
+            }
+          );
+        emit (
+          A.OPER {
+            assem = Printf.sprintf "\t%s 's0, 's1, 'j0\n" op';
+            src = [ e1_tmp; e2_tmp ];
+            dst = [];
+            jump = Some [ t_label ]
+          }
+        )
+
     and munch_exp = function
       | T.MEM (T.BINOP (T.PLUS, e1, T.CONST i)) ->
           result (fun r ->
@@ -181,17 +208,71 @@ module RistVGen : CODEGEN = struct
             | T.AND -> "and"
             | T.OR -> "or"
             | T.XOR -> "xor"
+            | T.LSHIFT -> "sll"
+            | T.RSHIFT -> "srl"
           in
           result (fun r ->
               emit
                 (A.OPER
                    {
-                     assem = Printf.sprintf "\t%s 'd0, 's0, 's1" (map_op op);
+                     assem = Printf.sprintf "\t%s 'd0, 's0, 's1\n" (map_op op);
                      src = [ munch_exp e1; munch_exp e2 ];
                      dst = [ r ];
                      jump = None;
                    }))
       | T.TEMP t -> t
+      | T.NAME lab ->
+        result (fun r ->
+            emit
+              (A.OPER
+                 {
+                   assem = Printf.sprintf "%s:\n" (Temp.string_of_label lab);
+                   src = [];
+                   dst = [ r ];
+                   jump = None
+                 }))
+      | T.CALL (e, args) ->
+        result (fun r ->
+            match e with
+            | T.NAME lab ->
+              emit (
+                A.OPER {
+                  assem = Printf.sprintf "\tcall %s\n\tmv 'd0, 'd1\n" (Temp.string_of_label lab);
+                  src = munch_args (0, args);
+                  dst = [ r ];
+                  jump = None
+                }
+              )
+            | _ ->
+              ErrorMsg.impossible "function must be called with label."
+          )
+      | T.ESEQ (stm, e) ->
+        munch_stm stm; munch_exp e
+
+  and munch_args (i, args) =
+    match args with
+    | arg :: rst ->
+      (match List.nth_opt Frame.arg_regs i with
+      | Some reg ->
+        emit (
+          A.MOVE
+            { assem = "\tmv 'd0, 's0\n";
+              src = munch_exp arg;
+              dst = reg;
+            });
+         reg :: munch_args (i + 1, rst)
+      | None ->
+        let offset = Frame.wordsize * (i - List.length Frame.arg_regs) in
+        (emit
+          (A.OPER
+             { assem = Printf.sprintf "\tsd 's0, %d('d0)\n" offset;
+               src = [ munch_exp arg ];
+               dst = [ Frame.fp ];
+               jump = None
+             });
+         munch_args (i + 1, rst)))
+    | [] -> []
+
     in
     munch_stm stm;
     List.rev !ir_list
@@ -199,20 +280,49 @@ module RistVGen : CODEGEN = struct
   let canonize stm =
     Canon.linearize stm |> Canon.basicBlocks |> Canon.traceSchedule
 
-  let%test_unit "test_assem" =
+  let debug_print_exp exp = exp |> Translate.show_exp |> Printf.eprintf "%s\n"
+
+  let debug_print_stm stms =
+    List.iter (fun stm -> stm |> Tree.show_stm |> Printf.eprintf "%s\n") stms
+
+  let debug_print_formatted formatted =
+    List.iter (Printf.eprintf "%s") formatted
+
+  let%test_unit "test_add" =
     Translate.init ();
 
     let frame =
       Frame.newFrame { name = Temp.namedlabel "main"; formals = [] }
     in
     let input_string = {|
-      1 + 1
+      let
+        var n := 1
+        var m := 2
+      in
+        n + m
+      end
 |} in
     let exp, _ = Semant.transProg (Parse.parse_string input_string) in
-    Translate.show_exp exp |> print_endline;
     let stms = canonize (Translate.unNx exp) in
-    List.iter (fun stm -> Tree.show_stm stm |> print_endline) stms;
     let res = List.map (fun stm -> codegen frame stm) stms |> List.flatten in
     List.iter (fun instr -> Assem.show_instr instr |> print_endline) res;
+    let formatted = List.map (Assem.format Frame.string_of_register) res in
+    debug_print_formatted formatted;
+    ()
+
+  let%test_unit "test_conditional_branch" =
+    Translate.init ();
+
+    let frame =
+      Frame.newFrame { name = Temp.namedlabel "main"; formals = [] }
+    in
+    let input_string = {|
+      if 1 < 2 then 100 else 200
+|} in
+    let exp, frag = Semant.transProg (Parse.parse_string input_string) in
+    let stms = canonize (Translate.unNx exp) in
+    let res = List.map (fun stm -> codegen frame stm) stms |> List.flatten in
+    let formatted = List.map (Assem.format Frame.string_of_register) res in
+    debug_print_formatted formatted;
     ()
 end

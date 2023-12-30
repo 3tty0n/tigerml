@@ -71,11 +71,8 @@ let rec actualTy ty pos =
       match !reference with
       | Some resolved -> actualTy resolved pos
       | None ->
-          let _ =
-            error pos
-              ("The type \"" ^ S.name sym ^ "\" has still not been resolved.")
-          in
-          raise SemanticError)
+        error pos
+          ("The type \"" ^ S.name sym ^ "\" has still not been resolved."))
   | _ -> ty
 
 let checkInt ({ ty; _ }, pos) = actualTy ty pos = T.INT
@@ -85,15 +82,13 @@ let getValue venv sym pos =
   match S.look venv sym with
   | Some value -> value
   | None ->
-      let _ = error pos ("The value \"" ^ S.name sym ^ "\" is undefined.") in
-      raise SemanticError
+      error pos ("The value \"" ^ S.name sym ^ "\" is undefined.")
 
 let getType tenv sym pos =
   match S.look tenv sym with
   | Some typ -> typ
   | None ->
-      let _ = error pos ("The type \"" ^ S.name sym ^ "\" is undefined.") in
-      raise SemanticError
+      error pos ("The type \"" ^ S.name sym ^ "\" is undefined.")
 
 let getActualType tenv sym pos = actualTy (getType tenv sym pos) pos
 
@@ -206,8 +201,7 @@ let rec transExp venv tenv senv level exp =
           match getActualType tenv typ pos with
           | T.RECORD (lst, _) as ty -> (ty, lst)
           | _ ->
-              let _ = error pos (typeName ^ " is not a record type.") in
-              raise SemanticError
+              error pos (typeName ^ " is not a record type.")
         in
         (* ensure each field is instantiated with the right type, in the right order *)
         let rec checkFields formals actuals translated =
@@ -263,15 +257,11 @@ let rec transExp venv tenv senv level exp =
         let varTyStr = tyStr varTy in
         let expTyStr = tyStr expTy in
         if isConst venv var pos then
-          let _ = error pos "Cannot reassign a constant variable." in
-          raise SemanticError
+          error pos "Cannot reassign a constant variable."
         else if not (checkTy varTy expTy) then
-          let _ =
-            error pos
-              ("Cannot assign a value of type " ^ expTyStr
+          error pos
+            ("Cannot assign a value of type " ^ expTyStr
              ^ " to an lvalue of type " ^ varTyStr ^ ".")
-          in
-          raise SemanticError
         else return (Translate.assignExp (varExp, aExp)) T.UNIT
     | A.IfExp { test; then'; else'; pos } ->
         let ({ exp = testExp; ty = testTy } as testExpTy) = trexp test in
@@ -383,8 +373,7 @@ let rec transExp venv tenv senv level exp =
           match getActualType tenv typ pos with
           | T.ARRAY (arrTy, _) as ty -> (ty, actualTy arrTy pos)
           | _ ->
-              let _ = error pos (typeName ^ " is not an array type.") in
-              raise SemanticError
+              error pos (typeName ^ " is not an array type.")
         in
         let arrTyStr = tyStr arrTy in
         let ({ exp = sizeExp; ty = sizeTy } as sizeExpTy) = trexp size in
@@ -429,16 +418,12 @@ and transVar venv tenv senv level var =
         match recTy with
         | T.RECORD (lst, _) -> lst
         | _ ->
-            let _ =
-              error pos
-                ("Cannot access field " ^ fieldStr ^ " on a non-record type.")
-            in
-            raise SemanticError
+          error pos
+            ("Cannot access field " ^ fieldStr ^ " on a non-record type.")
       in
       let rec findField i = function
         | [] ->
-            let _ = error pos ("Unknown field " ^ fieldStr ^ ".") in
-            raise SemanticError
+            error pos ("Unknown field " ^ fieldStr ^ ".")
         | (fieldSym, fieldTy) :: fieldTl ->
             if fieldSym = sym then (i, actualTy fieldTy pos)
             else findField (i + 1) fieldTl
@@ -604,12 +589,9 @@ and transDec venv tenv senv level dec =
           match ty with
           | T.NAME (sym, nextTy) ->
               if contains seen sym then
-                let _ =
-                  error pos
-                    ("Cycle detected in type declarations for type "
+                error pos
+                  ("Cycle detected in type declarations for type "
                    ^ S.name sym ^ ".")
-                in
-                raise SemanticError
               else
                 let unboxedTy =
                   match !nextTy with

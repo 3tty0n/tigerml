@@ -18,10 +18,20 @@ module type FRAME = sig
 
   (* return value *)
   val rv : Temp.temp
+
+  (* return address *)
+  val ra : Temp.temp
+
+  (* stack pointer *)
+  val sp : Temp.temp
+
   val wordsize : int
   val exp : access -> Tree.exp -> Tree.exp
   val externalCall : string * Tree.exp list -> Tree.exp
   val procEntryExit1 : frame * Tree.stm -> Tree.stm
+
+  val arg_regs : Temp.temp list
+  val string_of_register : Temp.temp -> string
 end
 
 module RISCVFrame : FRAME = struct
@@ -58,10 +68,6 @@ module RISCVFrame : FRAME = struct
         InFrame (!locals * 4)
     | false -> InReg (Temp.newtemp ())
 
-  let fp = Temp.newtemp ()
-  let rv = Temp.newtemp ()
-  let wordsize = 8
-
   let exp a e =
     match a with
     | InFrame k -> Tree.MEM (Tree.BINOP (Tree.PLUS, e, Tree.CONST k))
@@ -71,6 +77,74 @@ module RISCVFrame : FRAME = struct
     Tree.CALL (Tree.NAME (Temp.namedlabel name), exps)
 
   let procEntryExit1 (frame, stm) = stm
+
+  module TempMap = Map.Make
+      (struct
+        type t = string
+        let compare = String.compare
+      end)
+
+  let temp_map = ref Temp.Table.empty
+
+  let fp = Temp.newtemp ()      (* frame pointer *)
+  let rv = Temp.newtemp ()      (* return value *)
+  let ra = Temp.newtemp ()      (* return address *)
+  let sp = Temp.newtemp ()      (* stack pointer *)
+  let wordsize = 8
+
+  let process_registers lst =
+    temp_map := List.fold_left (fun m (reg_name, tmp) ->
+        Temp.Table.enter m tmp reg_name) !temp_map lst;
+    List.map snd lst
+
+  let special_regs =
+    process_registers [
+      ("zero", Temp.newtemp ());
+      ("ra", ra);
+      ("s0", Temp.newtemp ());  (* frame pointer *)
+      ("sp", sp);
+      ("fp", fp);
+    ]
+
+  let arg_regs =
+    process_registers [
+      ("a1", Temp.newtemp ());
+      ("a2", Temp.newtemp ());
+      ("a3", Temp.newtemp ());
+      ("a4", Temp.newtemp ());
+      ("a5", Temp.newtemp ());
+      ("a6", Temp.newtemp ());
+      ("a7", Temp.newtemp ());
+    ]
+
+  let calle_regs =
+    process_registers [
+      ("s2", Temp.newtemp ());
+      ("s3", Temp.newtemp ());
+      ("s4", Temp.newtemp ());
+      ("s5", Temp.newtemp ());
+      ("s6", Temp.newtemp ());
+      ("s7", Temp.newtemp ());
+      ("s8", Temp.newtemp ());
+      ("s9", Temp.newtemp ());
+    ]
+
+  let caller_save_regs =
+    process_registers [
+      ("t0", Temp.newtemp ());
+      ("t1", Temp.newtemp ());
+      ("t2", Temp.newtemp ());
+      ("t3", Temp.newtemp ());
+      ("t4", Temp.newtemp ());
+      ("t5", Temp.newtemp ());
+      ("t6", Temp.newtemp ());
+    ]
+
+  let string_of_register tmp =
+    match Temp.Table.look !temp_map tmp with
+    | Some reg -> reg
+    | None -> Temp.makestring tmp
+
 end
 
 module Frame : FRAME = RISCVFrame
