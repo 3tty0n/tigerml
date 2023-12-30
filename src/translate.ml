@@ -19,6 +19,7 @@ let outermost =
   { parent = None; frame; unique = ref () }
 
 let newLevel { parent; name; formals } =
+  (* add true to formals to manage static link *)
   let frame = Frame.newFrame { name; formals = true :: formals } in
   { parent = Some parent; frame; unique = ref () }
 
