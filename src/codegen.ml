@@ -74,7 +74,7 @@ module RiscVGen : CODEGEN = struct
           emit
             (A.MOVE
                {
-                 assem = Printf.sprintf "\tmove 'd0, 's0\n";
+                 assem = Printf.sprintf "\tmv 'd0, 's0\n";
                  src = munch_exp e2;
                  dst = i;
                })
@@ -100,7 +100,32 @@ module RiscVGen : CODEGEN = struct
                      jump = Some [ label ];
                    })
           | _ -> ErrorMsg.impossible "Impossible to jump to a non-label.")
-      | T.EXP exp -> ignore (munch_exp exp)
+      | T.EXP exp ->
+        (match exp with
+        | T.BINOP (_, e1, e2) ->
+          ignore (munch_exp e1);
+          ignore (munch_exp e2);
+        | T.CALL (e, args) ->
+          (match e with
+          | T.NAME name ->
+            emit
+              (A.OPER
+                 {
+                   assem =
+                     Printf.sprintf "\tcall %s\n" (Temp.string_of_label name);
+                   (* munch_args returns list of temporaries that are
+                      used in the function call, we put them here so that
+                      future liveliness analysis can tell that these values
+                      are needed up until the call *)
+                   src = munch_args (0, args);
+                   dst = calldefs;
+                   jump = None;
+                 })
+          | _ -> ErrorMsg.impossible "function call should be applied to label")
+        | T.ESEQ (stm, e) ->
+          munch_stm stm;
+          ignore (munch_exp e)
+        | _ -> ())
       | T.CJUMP (op, e1, e2, t_label, f_label) ->
         let op' = match op with
           | T.EQ -> "beq"

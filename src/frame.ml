@@ -217,7 +217,7 @@ module RISCVFrame : FRAME = struct
           ) ([], 0, 0) formals
       in
       decrement :: store_saved_regs @
-      [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" ((space - 1) * wordsize);
+      [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" (List.length formals * wordsize);
                  src = sp;
                  dst = ra } ] (* store ra *)
     in
