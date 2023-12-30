@@ -51,14 +51,18 @@ and traverseExp env d s =
 and traverseDecs env d s =
   let traverseFundec env ({ params; body } : A.fundec) =
     let new_depth = d + 1 in
-    let add_param env ({ name; escape; _ } : A.field) =
-      S.enter env name (new_depth, escape)
+    let add_param env ({ name; escape = r; _ } : A.field) =
+      r := false;
+      S.enter env name (new_depth, r)
     in
     let env' = List.fold_left add_param env params in
     traverseExp env' new_depth body
   in
   let traverseDec env = function
-    | A.VarDec { name; escape } -> S.enter env name (d, escape)
+    | A.VarDec { name; escape = r; init; _ } ->
+      traverseExp env d init;
+      r := false;
+      S.enter env name (d, r);
     | A.FunctionDec fundecs ->
         let _ = List.iter (traverseFundec env) fundecs in
         env
