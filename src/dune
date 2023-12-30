@@ -1,4 +1,5 @@
 (ocamllex lexer)
+
 (ocamlyacc parser)
 
 (executable
@@ -6,21 +7,27 @@
  (public_name tigerml)
  (modules main)
  (libraries core str tiger)
- (preprocess (pps ppx_deriving.show ppx_sexp_conv ppx_compare)))
+ (preprocess
+  (pps ppx_deriving.show ppx_sexp_conv ppx_compare)))
 
 (library
  (name tiger)
  (modules :standard \ main)
  (inline_tests)
  (libraries core str)
- (preprocess (pps ppx_inline_test ppx_deriving.show ppx_sexp_conv ppx_compare))
- )
+ (preprocess
+  (pps ppx_inline_test ppx_deriving.show ppx_sexp_conv ppx_compare)))
 
 (env
  (dev
   (flags
-   (-w -4-33-40-41-42-43-34-44 -short-paths -strict-sequence -strict-formats
-       -short-paths -keep-locs)))
+   (-w
+    -4-33-40-41-42-43-34-44
+    -short-paths
+    -strict-sequence
+    -strict-formats
+    -short-paths
+    -keep-locs)))
  (release
   (flags
    (-w K -O3))))

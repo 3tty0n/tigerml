@@ -14,9 +14,9 @@ let run filename =
     Printtree.printtree (stderr, Translate.unNx exp);
     Printf.eprintf "=============== frags ==============\n";
     List.iter (fun f -> Frame.show_frag f |> Printf.eprintf "%s\n") frag
+  with ErrorMsg.SemanticError s as e ->
+    Printf.eprintf "Failed to typecheck \"%s\"." filename;
+    raise e
 
-  with Semant.SemanticError -> print_endline ("Failed to typecheck \"" ^ filename ^ "\"."); exit 1
-
-let main () = run (Sys.argv.(1))
-
+let main () = run Sys.argv.(1)
 let () = main ()

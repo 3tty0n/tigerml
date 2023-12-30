@@ -32,12 +32,20 @@ and stm =
   | SEQ of stm * stm
   (* ABEL(n) Define the constant value of name n to be the current machine code
      address. This is like a label definition in assembly language. After which
-     NAME(n) may be the target of jumps, calls, etc  *)
+     NAME(n) may be the target of jumps, calls, etc *)
   | LABEL of Temp.label
 [@@deriving show]
 
-and binop = PLUS | MINUS | MUL | DIV
-          | AND | OR | LSHIFT | RSHIFT | XOR (* | ARSHIFT *)
+and binop =
+  | PLUS
+  | MINUS
+  | MUL
+  | DIV
+  | AND
+  | OR
+  | LSHIFT
+  | RSHIFT
+  | XOR (* | ARSHIFT *)
 [@@deriving show]
 
 and relop = EQ | NE | LT | GT | LE | GE (* | ULT | ULE | UGT | UGE *)

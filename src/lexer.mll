@@ -2,12 +2,12 @@
 {
   open Parser
 
-	let lineNum = ErrorMsg.lineNum
-	let linePos = ErrorMsg.linePos
+  let lineNum = ErrorMsg.lineNum
+  let linePos = ErrorMsg.linePos
 
-	let error pos msg = (ErrorMsg.error pos ("Lexer error: " ^ msg))
+  let error pos msg = (ErrorMsg.error pos ("Lexer error: " ^ msg))
 
-  let fail = ErrorMsg.fail
+  let fail s = ErrorMsg.fail s
 
   let lpos lexbuf = Lexing.lexeme_start lexbuf
 
@@ -77,18 +77,17 @@ rule tokenize = parse
   | whitespace {tokenize lexbuf}
   | '\r'? '\n' {nextLine (1 + lpos lexbuf); tokenize lexbuf}
   | eof {EOF}
-  | _ as s {error (lpos lexbuf) ("Unknown character '" ^ Char.escaped s ^ "'"); fail ();}
+  | _ as s { error (lpos lexbuf) ("Unknown character '" ^ Char.escaped s ^ "'") }
 and str buf = parse
   | '"' {
       let result = Buffer.contents buf in
       STRING result
     }
   | '\\' {escaped buf lexbuf}
-  | eof {error (lpos lexbuf) "File ended with unclosed string."; fail ()}
+  | eof { error (lpos lexbuf) "File ended with unclosed string." }
   | '\n' {
       nextLine (1 + lpos lexbuf);
-      error (lpos lexbuf) "Strings cannot span multiple lines.";
-      ErrorMsg.fail ()
+      error (lpos lexbuf) "Strings cannot span multiple lines."
     }
   | _ as s {Buffer.add_char buf s; str buf lexbuf}
 and escaped buf = parse
@@ -98,11 +97,11 @@ and escaped buf = parse
   | number number number as num_str {
       let num = int_of_string num_str in
       if num >= 0 && num <= 255 then Buffer.add_char buf (Char.chr num)
-      else (error (lpos lexbuf) ("Invalid ASCII ordinal '" ^ num_str ^ "'"); fail ());
+      else (error (lpos lexbuf) ("Invalid ASCII ordinal '" ^ num_str ^ "'"));
       str buf lexbuf
     }
-  | '"' {Buffer.add_char buf '"'; str buf lexbuf}
-  | '\\' {Buffer.add_char buf '\\'; str buf lexbuf} 
+  | '"' { Buffer.add_char buf '"'; str buf lexbuf }
+  | '\\' { Buffer.add_char buf '\\'; str buf lexbuf}
   | [' ' '\t' '\n']+ '\\' as skip {
       let rec incr_newlines s n = match s with
         "" -> ()
@@ -115,10 +114,10 @@ and escaped buf = parse
       str buf lexbuf
     }
 and comment level = parse
-  | "/*" {comment (level + 1) lexbuf}
-  | "*/" {if level = 1 then (tokenize lexbuf) else (comment (level - 1) lexbuf)}
-  | '\n' {nextLine (1 + lpos lexbuf); comment level lexbuf}
-  | eof {error (lpos lexbuf) "File ended with unclosed comment."; fail ()}
-  | _ {comment level lexbuf}
+  | "/*" { comment (level + 1) lexbuf }
+  | "*/" { if level = 1 then (tokenize lexbuf) else (comment (level - 1) lexbuf) }
+  | '\n' { nextLine (1 + lpos lexbuf); comment level lexbuf }
+  | eof { error (lpos lexbuf) "File ended with unclosed comment." }
+  | _ { comment level lexbuf }
 
 (* trailer *)
