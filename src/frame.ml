@@ -114,8 +114,6 @@ module RISCVFrame : FRAME = struct
   let externalCall (name, exps) =
     Tree.CALL (Tree.NAME (Temp.namedlabel name), exps)
 
-  let procEntryExit1 (frame, stm) = stm
-
   module TempMap = Map.Make
       (struct
         type t = string
@@ -191,11 +189,57 @@ module RISCVFrame : FRAME = struct
     | Some reg -> reg
     | None -> Temp.makestring tmp
 
+  let procEntryExit1 (frame, body) =
+    let open Tree in
+    let { name; formals; locals } = frame in
+    let set_param (stmt, n) access =
+      if n < 4 then
+        match access with
+        | InReg t ->
+          SEQ (
+            MOVE (TEMP t, TEMP (List.nth arg_regs n)),
+            stmt
+          ), n + 1
+        | InFrame k ->
+          SEQ (
+            MOVE (MEM (BINOP (PLUS, TEMP fp, CONST k)),
+                  TEMP (List.nth arg_regs n)),
+            stmt
+          ), n + 1
+      else
+        match access with
+        | InReg t ->
+          SEQ (
+            MOVE (TEMP t,
+                  MEM (BINOP (PLUS, TEMP fp, CONST (n * wordsize)))),
+            stmt
+          ), n + 1
+        | InFrame k ->
+          stmt, n + 1
+    in
+    let body, _ = List.fold_left set_param (body, 0) formals in
+
+    let save_load_reg stmt temp =
+      let open Tree in
+      let access = allocLocal frame false in
+      let location_exp = exp access (TEMP fp) in
+      SEQ (
+        SEQ (
+          MOVE (location_exp, TEMP (temp)),
+          stmt
+        ),
+        MOVE (TEMP temp, location_exp)
+      )
+    in
+    (* List.fold_left save_load_reg body callee_save_regs *)
+    (* |> fun stmt -> List.fold_left save_load_reg stmt [ra] *)
+    body
+
   let procEntryExit2 (frame, body) =
     body @ [
       Assem.OPER {
         assem = "";
-        src = [ sp; fp ] @ callee_save_regs;
+        src = [ zero; ra; sp; fp ] @ callee_save_regs;
         dst = [];
         jump = Some []
       }
@@ -212,10 +256,11 @@ module RISCVFrame : FRAME = struct
   let procEntryExit3 (frame, body) =
 
     let create assems =
-      List.map (fun assem -> A.OPER { assem; src = []; dst = []; jump = None }) assems
+      List.map (fun assem -> A.MOVE { assem; src = Temp.newtemp (); dst = Temp.newtemp () }) assems
     in
 
     let { name; formals; locals } = frame in
+
     let space = List.length formals + !locals in (* number of s registers used *)
     let prologue =
       Printf.sprintf "\taddi, sp, sp, %d\n" (-space * wordsize) ::
@@ -226,9 +271,11 @@ module RISCVFrame : FRAME = struct
     let epilogue =
       Printf.sprintf "\tld, ra, %d(sp)\n" ((space - 1) * wordsize) ::
       Printf.sprintf "\tld, s0, %d(sp)\n" ((space - 2) * wordsize) ::
-      Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) :: []
+      Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) ::
+      Printf.sprintf "\tjr ra\n" :: []
       |> create in
-    { prolog = prologue; body = body; epilog = epilogue }
+    { prolog = A.LABEL { assem = Printf.sprintf "%s:\n" (Symbol.name name); lab = name } :: prologue;
+      body = body; epilog = epilogue }
 
 end
 

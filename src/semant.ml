@@ -401,13 +401,13 @@ let rec transExp venv tenv senv level exp =
 and transVar venv tenv senv level var =
   match var with
   | A.SimpleVar (sym, pos) ->
-      let varStr = S.name sym in
-      let ty, access =
-        match getValue venv sym pos with
-        | Env.VarEntry { ty; access; _ } -> (actualTy ty pos, access)
-        | _ -> error pos ("Function " ^ varStr ^ " is being used as a variable.")
-      in
-      return (Translate.simpleVar (access, level)) ty
+    let varStr = S.name sym in
+    let ty, access =
+      match getValue venv sym pos with
+      | Env.VarEntry { ty; access; _ } -> (actualTy ty pos, access)
+      | _ -> error pos ("Function " ^ varStr ^ " is being used as a variable.")
+    in
+    return (Translate.simpleVar (access, level)) ty
   | A.FieldVar (recVar, sym, pos) ->
       let fieldStr = quote (S.name sym) in
       (* ensure that the lvalue is a record type *)
