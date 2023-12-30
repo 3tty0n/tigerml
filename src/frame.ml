@@ -82,7 +82,7 @@ module RISCVFrame : FRAME = struct
   let allocLocal ({ locals; _ } : frame) = function
     | true ->
       incr locals;
-      InFrame (local_start_offset + !locals * wordsize)
+      InFrame (local_start_offset - !locals * wordsize)
     | false -> InReg (Temp.newtemp ())
 
   let exp a e =
@@ -197,7 +197,7 @@ module RISCVFrame : FRAME = struct
           dst = [];
           jump = None }
       in
-      let store_saved_regs, _, _ =
+      let store_saved_regs, num_used_frame, _ =
         List.fold_left (fun (acc, i_frame, i_reg) formal ->
             match formal with
             | InFrame n ->
@@ -209,20 +209,16 @@ module RISCVFrame : FRAME = struct
                 }
               ], i_frame + 1, i_reg
             | InReg reg ->
-              acc @ [A.MOVE {
-                assem = Printf.sprintf "\tmv 's0, 'd0\n";
-                src = List.nth arg_regs i_reg;
-                dst = reg
-              }], i_frame, i_reg
+              acc, i_frame, i_reg + 1
           ) ([], 0, 0) formals
       in
       decrement :: store_saved_regs @
-      [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" (List.length formals * wordsize);
+      [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" (num_used_frame * wordsize);
                  src = sp;
                  dst = ra } ] (* store ra *)
     in
     let create_epilog formals =
-      let back_saved_regs, _, _ =
+      let back_saved_regs, num_used_frame, _ =
         List.fold_left (fun (acc, i_frame, i_reg) formal ->
             match formal with
             | InFrame n ->
@@ -234,7 +230,7 @@ module RISCVFrame : FRAME = struct
           ) ([], 0, 0) formals
       in
       let reload_ra =
-        A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" ((List.length formals) * wordsize);
+        A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" (num_used_frame * wordsize);
                  src = sp;
                  dst = ra }
       in
