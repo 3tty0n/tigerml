@@ -261,15 +261,15 @@ module RISCVFrame : FRAME = struct
     let space = List.length formals + !locals in (* number of s registers used *)
     let prologue =
       Printf.sprintf "%s:\n" (Symbol.name name) ::
-      Printf.sprintf "\taddi, sp, sp, %d\n" (-space * wordsize) ::
-      Printf.sprintf "\tsd, ra, %d(sp)\n" ((space - 1) * wordsize) ::
-      Printf.sprintf "\tsd, s0, %d(sp)\n" ((space - 2) * wordsize) ::
-      Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) :: []
+      Printf.sprintf "\taddi sp, sp, %d\n" (-space * wordsize) ::
+      Printf.sprintf "\tsd ra, %d(sp)\n" ((space - 1) * wordsize) ::
+      Printf.sprintf "\tsd s0, %d(sp)\n" ((space - 2) * wordsize) ::
+      Printf.sprintf "\taddi s0, sp, %d\n" (space * wordsize) :: []
     in
     let epilogue =
-      Printf.sprintf "\tld, ra, %d(sp)\n" ((space - 1) * wordsize) ::
-      Printf.sprintf "\tld, s0, %d(sp)\n" ((space - 2) * wordsize) ::
-      Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) ::
+      Printf.sprintf "\tld ra, %d(sp)\n" ((space - 1) * wordsize) ::
+      Printf.sprintf "\tld s0, %d(sp)\n" ((space - 2) * wordsize) ::
+      Printf.sprintf "\taddi s0, sp, %d\n" (space * wordsize) ::
       Printf.sprintf "\tjr ra\n" :: []
     in
     { prologue = prologue; body = body; epilogue = epilogue }
