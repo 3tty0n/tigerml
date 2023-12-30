@@ -29,8 +29,14 @@ module type FRAME = sig
   val exp : access -> Tree.exp -> Tree.exp
   val externalCall : string * Tree.exp list -> Tree.exp
   val procEntryExit1 : frame * Tree.stm -> Tree.stm
+  val procEntryExit2 : frame * Assem.instr list -> Assem.instr list
+
+  type fn_prolog_epilog = { prolog : Assem.instr list; body : Assem.instr list; epilog : Assem.instr list }
+  val procEntryExit3 : frame * Assem.instr list -> fn_prolog_epilog
 
   val arg_regs : Temp.temp list
+  val callee_save_regs : Temp.temp list
+  val caller_save_regs : Temp.temp list
   val string_of_register : Temp.temp -> string
 end
 
@@ -47,14 +53,25 @@ module RISCVFrame : FRAME = struct
     | STRING of Temp.label * string
   [@@deriving show]
 
-  let buildFormalAccess formals =
-    let compine (n_frame, lst) = function
-      | true -> (n_frame + 1, InFrame ((n_frame + 1) * 4) :: lst)
-      | false -> (n_frame, InReg (Temp.newtemp ()) :: lst)
-    in
+  let wordsize = 8
 
-    let _, revrsedAccess = List.fold_left compine (0, []) formals in
-    List.rev revrsedAccess
+  let formals_start_offset = 0
+
+  let local_start_offset = 24
+
+  let num_formals_in_registers = 8
+
+  let buildFormalAccess formals =
+    let _, _, l =
+      List.fold_left
+        (fun (i, pos, l) escape ->
+          if i < num_formals_in_registers && not escape then
+            (i + 1, pos, InReg (Temp.newtemp ()) :: l)
+          else (i + 1, pos + wordsize, InFrame pos :: l))
+        (0, formals_start_offset, [])
+        formals
+    in
+    List.rev l
 
   let newFrame ({ name; formals } : newFrameParams) =
     { name; formals = buildFormalAccess formals; locals = ref 0 }
@@ -64,8 +81,8 @@ module RISCVFrame : FRAME = struct
 
   let allocLocal ({ locals; _ } : frame) = function
     | true ->
-        incr locals;
-        InFrame (!locals * 4)
+      incr locals;
+      InFrame (local_start_offset + !locals * wordsize)
     | false -> InReg (Temp.newtemp ())
 
   let exp a e =
@@ -86,11 +103,12 @@ module RISCVFrame : FRAME = struct
 
   let temp_map = ref Temp.Table.empty
 
+  let zero = Temp.newtemp ()
   let fp = Temp.newtemp ()      (* frame pointer *)
+  let s0 = Temp.newtemp ()      (* saved register *)
   let rv = Temp.newtemp ()      (* return value *)
   let ra = Temp.newtemp ()      (* return address *)
   let sp = Temp.newtemp ()      (* stack pointer *)
-  let wordsize = 8
 
   let process_registers lst =
     temp_map := List.fold_left (fun m (reg_name, tmp) ->
@@ -99,11 +117,12 @@ module RISCVFrame : FRAME = struct
 
   let special_regs =
     process_registers [
-      ("zero", Temp.newtemp ());
+      ("zero", zero);
       ("ra", ra);
-      ("s0", Temp.newtemp ());  (* frame pointer *)
+      ("s0", s0);  (* frame pointer *)
       ("sp", sp);
       ("fp", fp);
+      ("a0", rv)
     ]
 
   let arg_regs =
@@ -117,8 +136,10 @@ module RISCVFrame : FRAME = struct
       ("a7", Temp.newtemp ());
     ]
 
-  let calle_regs =
+  let callee_save_regs =
     process_registers [
+      ("s0", s0);
+      ("s1", Temp.newtemp());
       ("s2", Temp.newtemp ());
       ("s3", Temp.newtemp ());
       ("s4", Temp.newtemp ());
@@ -144,6 +165,94 @@ module RISCVFrame : FRAME = struct
     match Temp.Table.look !temp_map tmp with
     | Some reg -> reg
     | None -> Temp.makestring tmp
+
+  let procEntryExit2 (frame, body) =
+    body @ [
+      Assem.OPER {
+        assem = "";
+        src = [ sp; fp ] @ callee_save_regs;
+        dst = [];
+        jump = Some []
+      }
+    ]
+
+  type fn_prolog_epilog = {
+    prolog : Assem.instr list;
+    body : Assem.instr list;
+    epilog : Assem.instr list
+  }
+
+  module A = Assem
+
+  (* See https://inst.eecs.berkeley.edu/~cs61c/resources/RISCV_Calling_Convention.pdf *)
+  let procEntryExit3 (frame, body) =
+    let { name; formals; locals } = frame in
+    let space = List.length formals + !locals in
+
+    let create_prolog formals =
+      let decrement =
+        A.OPER {
+          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (-space * 16);
+          src = [ sp ];
+          dst = [];
+          jump = None }
+      in
+      let store_saved_regs =
+        List.mapi (fun i formal ->
+            match formal with
+            | InFrame n ->
+              A.MOVE {
+                assem = Printf.sprintf "\tsd 's0, %d('d0)\n" n;
+                src = List.nth callee_save_regs (n / wordsize);
+                dst = sp
+              }
+            | InReg tmp ->
+              A.MOVE {
+                assem = Printf.sprintf "\tsd 's0, %d('d0)\n" (i * wordsize);
+                src = tmp;
+                dst = sp
+              }
+          ) formals
+      in
+      decrement :: store_saved_regs @
+      [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" ((space - 1) * wordsize);
+                 src = sp;
+                 dst = ra } ] (* store ra *)
+    in
+    let create_epilog formals =
+      let back_saved_regs =
+        List.mapi (fun i formal ->
+            match formal with
+            | InFrame n ->
+              A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" n;
+                       src = sp;
+                       dst = List.nth callee_save_regs (n / wordsize) }
+            | InReg reg ->
+              A.MOVE { assem = "\tmv 'd0, 's0\n";
+                       src = List.nth callee_save_regs i;
+                       dst = reg }
+          ) formals
+      in
+      let reload_ra =
+        A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" ((List.length formals) * wordsize);
+                 src = sp;
+                 dst = ra }
+      in
+      let increment =
+        A.OPER {
+          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (space * 16);
+          src = [ sp ];
+          dst = [];
+          jump = None }
+      in
+      let jump_back = A.OPER { assem = "\tjr 's0\n"; src = [ ra ]; dst = []; jump = None } in
+      back_saved_regs @ [ reload_ra; increment; jump_back ]
+    in
+    {
+      prolog = create_prolog formals;
+      body = body;
+      epilog = create_epilog formals;
+    }
 
 end
 

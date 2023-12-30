@@ -6,7 +6,7 @@ module type CODEGEN = sig
   val codegen : Frame.frame -> Tree.stm -> Assem.instr list
 end
 
-module RistVGen : CODEGEN = struct
+module RiscVGen : CODEGEN = struct
   let codegen frame stm =
     let ir_list : A.instr list ref = ref [] in
     let emit instr = ir_list := instr :: !ir_list in
@@ -17,6 +17,8 @@ module RistVGen : CODEGEN = struct
       t
     in
 
+    let calldefs = [ Frame.rv; Frame.rv ] @ Frame.caller_save_regs in
+
     let rec munch_stm = function
       | T.SEQ (a, b) ->
           munch_stm a;
@@ -26,7 +28,7 @@ module RistVGen : CODEGEN = struct
             (A.OPER
                {
                  assem =
-                   Printf.sprintf "\taddi 's2, 's0, %d\n\tsd 's1, 0('s2)" i;
+                   Printf.sprintf "\taddi 's2, 's0, %d\n\tsd 's1, 0('s2)\n" i;
                  src = [ munch_exp e1; munch_exp e2; Temp.newtemp () ];
                  dst = [];
                  jump = None;
@@ -36,7 +38,7 @@ module RistVGen : CODEGEN = struct
             (A.OPER
                {
                  assem =
-                   Printf.sprintf "\taddi 's2, 's0, %d\n\tsd 's1, 0('s2)" i;
+                   Printf.sprintf "\taddi 's2, 's0, %d\n\tsd 's1, 0('s2)\n" i;
                  src = [ munch_exp e1; munch_exp e2; Temp.newtemp () ];
                  dst = [];
                  jump = None;
@@ -45,7 +47,7 @@ module RistVGen : CODEGEN = struct
           emit
             (A.OPER
                {
-                 assem = Printf.sprintf "\tld 's1, 's0\n\tsd 's1, 0('s1)";
+                 assem = Printf.sprintf "\tld 's1, 's0\n\tsd 's1, 0('s1)\n";
                  src = [ munch_exp e1; munch_exp e2 ];
                  dst = [];
                  jump = None;
@@ -54,7 +56,7 @@ module RistVGen : CODEGEN = struct
           emit
             (A.OPER
                {
-                 assem = Printf.sprintf "\tli 's0, %d\n\tsd 's1, 0('s0)" i;
+                 assem = Printf.sprintf "\tli 's0, %d\n\tsd 's1, 0('s0)\n" i;
                  src = [ Temp.newtemp (); munch_exp e2 ];
                  dst = [];
                  jump = None;
@@ -63,7 +65,7 @@ module RistVGen : CODEGEN = struct
           emit
             (A.OPER
                {
-                 assem = Printf.sprintf "\tsd 's1, 0('s0)";
+                 assem = Printf.sprintf "\tsd 's1, 0('s0)\n";
                  src = [ munch_exp e1; munch_exp e2 ];
                  dst = [];
                  jump = None;
@@ -72,11 +74,13 @@ module RistVGen : CODEGEN = struct
           emit
             (A.MOVE
                {
-                 assem = Printf.sprintf "\tmove 'd0, 's0";
+                 assem = Printf.sprintf "\tmove 'd0, 's0\n";
                  src = munch_exp e2;
                  dst = i;
                })
-      | T.MOVE (_, _) -> ErrorMsg.impossible "Impossible MOVE"
+      | T.MOVE (_, _) as stm ->
+        Printf.eprintf "Invalid MOVE: %s\n" (T.show_stm stm);
+        ErrorMsg.impossible "MOVE's first operand should be TEMP or MEM"
       | T.LABEL lab ->
           emit
             (A.LABEL
@@ -109,7 +113,7 @@ module RistVGen : CODEGEN = struct
         if op = T.LE || op = T.GE then
           emit (
             A.OPER {
-              assem = "\taddi, 's0, 's0, 1";
+              assem = "\taddi, 's0, 's0, 1\n";
               src = [ e2_tmp ];
               dst = [];
               jump = None
@@ -239,7 +243,7 @@ module RistVGen : CODEGEN = struct
                 A.OPER {
                   assem = Printf.sprintf "\tcall %s\n\tmv 'd0, 'd1\n" (Temp.string_of_label lab);
                   src = munch_args (0, args);
-                  dst = [ r ];
+                  dst = r :: Frame.rv :: calldefs;
                   jump = None
                 }
               )
@@ -249,29 +253,29 @@ module RistVGen : CODEGEN = struct
       | T.ESEQ (stm, e) ->
         munch_stm stm; munch_exp e
 
-  and munch_args (i, args) =
-    match args with
-    | arg :: rst ->
-      (match List.nth_opt Frame.arg_regs i with
-      | Some reg ->
-        emit (
-          A.MOVE
-            { assem = "\tmv 'd0, 's0\n";
-              src = munch_exp arg;
-              dst = reg;
-            });
-         reg :: munch_args (i + 1, rst)
-      | None ->
-        let offset = Frame.wordsize * (i - List.length Frame.arg_regs) in
-        (emit
-          (A.OPER
-             { assem = Printf.sprintf "\tsd 's0, %d('d0)\n" offset;
-               src = [ munch_exp arg ];
-               dst = [ Frame.fp ];
-               jump = None
-             });
-         munch_args (i + 1, rst)))
-    | [] -> []
+    and munch_args (i, args) =
+      match args with
+      | arg :: rst ->
+        (match List.nth_opt Frame.arg_regs i with
+         | Some reg ->
+           emit (
+             A.MOVE
+               { assem = "\tmv 'd0, 's0\n";
+                 src = munch_exp arg;
+                 dst = reg;
+               });
+           reg :: munch_args (i + 1, rst)
+         | None ->
+           let offset = Frame.wordsize * (i - List.length Frame.arg_regs) in
+           (emit
+              (A.OPER
+                 { assem = Printf.sprintf "\tsd 's0, %d('d0)\n" offset;
+                   src = [ munch_exp arg ];
+                   dst = [ Frame.fp ];
+                   jump = None
+                 });
+            munch_args (i + 1, rst)))
+      | [] -> []
 
     in
     munch_stm stm;
