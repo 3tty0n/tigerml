@@ -32,7 +32,10 @@ let codegen_exp frame exp =
 
 let codegen filename =
   Parse.parse filename
-  |> fun ast -> FindEscape.findEscape ast; ast
+  |> fun ast ->
+  FindEscape.findEscape ast;
+  Absyn.show_exp ast |> Printf.eprintf "%s\n";
+  ast
   |> Semant.transProg
   |> fun (exp, frag) ->
   Printf.eprintf "================ IR ================\n";
