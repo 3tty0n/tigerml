@@ -1,3 +1,21 @@
+(*
+    Frames para riscv (sin registers).
+
+0xffff
+        |    ...     |  s0+16 |
+        |   arg 10   |  s0+8  | 48(sp)
+        |   arg 9    |  s0    | 40(sp)
+        --------------  s0
+        |   fp ant   |  s0-8  | 32(sp)
+        | stat link  |  s0-16 | 24(sp)
+        |   return   |  s0-24 | 16(sp)
+        |  local 1   |  s0-32 |  8(sp)
+        |  local 2   |  sp
+        |    ...     |
+0x0
+
+*)
+
 module type FRAME = sig
   type access [@@deriving show]
   type frame [@@deriving show]
@@ -61,8 +79,10 @@ module RISCVFrame : FRAME = struct
 
   let num_formals_in_registers = 8
 
+  let max_out_count = ref 0
+
   let buildFormalAccess formals =
-    let _, _, l =
+    let formal_count, _, processed_formals =
       List.fold_left
         (fun (i, pos, l) escape ->
           if i < num_formals_in_registers && not escape then
@@ -71,7 +91,8 @@ module RISCVFrame : FRAME = struct
         (0, formals_start_offset, [])
         formals
     in
-    List.rev l
+    if formal_count > !max_out_count then max_out_count := formal_count;
+    List.rev processed_formals
 
   let newFrame ({ name; formals } : newFrameParams) =
     { name; formals = buildFormalAccess formals; locals = ref 0 }
@@ -109,6 +130,10 @@ module RISCVFrame : FRAME = struct
   let rv = Temp.newtemp ()      (* return value *)
   let ra = Temp.newtemp ()      (* return address *)
   let sp = Temp.newtemp ()      (* stack pointer *)
+
+  let fp_prev = -wordsize
+  let fp_prev_lev = -2 * wordsize
+  let ra_prev = -3 * wordsize
 
   let process_registers lst =
     temp_map := List.fold_left (fun m (reg_name, tmp) ->
@@ -184,71 +209,26 @@ module RISCVFrame : FRAME = struct
 
   module A = Assem
 
-  (* See https://inst.eecs.berkeley.edu/~cs61c/resources/RISCV_Calling_Convention.pdf *)
   let procEntryExit3 (frame, body) =
-    let { name; formals; locals } = frame in
-    let space = List.length formals + !locals in
 
-    let create_prolog formals =
-      let decrement =
-        A.OPER {
-          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (-space * wordsize);
-          src = [ sp ];
-          dst = [];
-          jump = None }
-      in
-      let store_saved_regs, num_used_frame, _ =
-        List.fold_left (fun (acc, i_frame, i_reg) formal ->
-            match formal with
-            | InFrame n ->
-              acc @ [
-                A.MOVE {
-                  assem = Printf.sprintf "\tsd 's0, %d('d0)\n" n;
-                  src = List.nth callee_save_regs (n / wordsize);
-                  dst = sp
-                }
-              ], i_frame + 1, i_reg
-            | InReg reg ->
-              acc, i_frame, i_reg + 1
-          ) ([], 0, 0) formals
-      in
-      decrement :: store_saved_regs @
-      [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" (num_used_frame * wordsize);
-                 src = sp;
-                 dst = ra } ] (* store ra *)
+    let create assems =
+      List.map (fun assem -> A.OPER { assem; src = []; dst = []; jump = None }) assems
     in
-    let create_epilog formals =
-      let back_saved_regs, num_used_frame, _ =
-        List.fold_left (fun (acc, i_frame, i_reg) formal ->
-            match formal with
-            | InFrame n ->
-              acc @ [A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" n;
-                       src = sp;
-                       dst = List.nth callee_save_regs (n / wordsize) }], i_frame + 1, i_reg
-            | InReg reg ->
-              acc, i_frame, i_reg + 1
-          ) ([], 0, 0) formals
-      in
-      let reload_ra =
-        A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" (num_used_frame * wordsize);
-                 src = sp;
-                 dst = ra }
-      in
-      let increment =
-        A.OPER {
-          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (space * wordsize);
-          src = [ sp ];
-          dst = [];
-          jump = None }
-      in
-      let jump_back = A.OPER { assem = "\tjr 's0\n"; src = [ ra ]; dst = []; jump = None } in
-      back_saved_regs @ [ reload_ra; increment; jump_back ]
-    in
-    {
-      prolog = create_prolog formals;
-      body = body;
-      epilog = create_epilog formals;
-    }
+
+    let { name; formals; locals } = frame in
+    let space = List.length formals + !locals in (* number of s registers used *)
+    let prologue =
+      Printf.sprintf "\taddi, sp, sp, %d\n" (-space * wordsize) ::
+      Printf.sprintf "\tsd, ra, %d(sp)\n" ((space - 1) * wordsize) ::
+      Printf.sprintf "\tsd, s0, %d(sp)\n" ((space - 2) * wordsize) ::
+      Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) :: []
+      |> create in
+    let epilogue =
+      Printf.sprintf "\tld, ra, %d(sp)\n" ((space - 1) * wordsize) ::
+      Printf.sprintf "\tld, s0, %d(sp)\n" ((space - 2) * wordsize) ::
+      Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) :: []
+      |> create in
+    { prolog = prologue; body = body; epilog = epilogue }
 
 end
 
