@@ -36,7 +36,7 @@ let codegen filename =
   |> Semant.transProg
   |> fun (exp, frag) ->
   Printf.eprintf "================ IR ================\n";
-  Printtree.printtree (stderr, Translate.unNx exp);
+  Translate.show_exp exp |> Printf.eprintf "%s\n";
   Printf.eprintf "=============== frags ==============\n";
   List.iter (fun f -> Frame.show_frag f |> Printf.eprintf "%s\n") frag;
   let frame =
