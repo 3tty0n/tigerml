@@ -49,8 +49,8 @@ module type FRAME = sig
   val procEntryExit1 : frame * Tree.stm -> Tree.stm
   val procEntryExit2 : frame * Assem.instr list -> Assem.instr list
 
-  type fn_prolog_epilog = { prolog : Assem.instr list; body : Assem.instr list; epilog : Assem.instr list }
-  val procEntryExit3 : frame * Assem.instr list -> fn_prolog_epilog
+  type fn = { prologue : string list; body : Assem.instr list; epilogue : string list }
+  val procEntryExit3 : frame * Assem.instr list -> fn
 
   val arg_regs : Temp.temp list
   val callee_save_regs : Temp.temp list
@@ -190,6 +190,7 @@ module RISCVFrame : FRAME = struct
     | None -> Temp.makestring tmp
 
   let procEntryExit1 (frame, body) =
+
     let open Tree in
     let { name; formals; locals } = frame in
     let set_param (stmt, n) access =
@@ -239,43 +240,39 @@ module RISCVFrame : FRAME = struct
     body @ [
       Assem.OPER {
         assem = "";
-        src = [ zero; ra; sp; fp ] @ callee_save_regs;
+        src = [ ra; sp; fp ] @ callee_save_regs;
         dst = [];
         jump = Some []
       }
     ]
 
-  type fn_prolog_epilog = {
-    prolog : Assem.instr list;
+  type fn = {
+    prologue : string list;
     body : Assem.instr list;
-    epilog : Assem.instr list
+    epilogue : string list
   }
 
   module A = Assem
 
   let procEntryExit3 (frame, body) =
 
-    let create assems =
-      List.map (fun assem -> A.MOVE { assem; src = Temp.newtemp (); dst = Temp.newtemp () }) assems
-    in
-
     let { name; formals; locals } = frame in
 
     let space = List.length formals + !locals in (* number of s registers used *)
     let prologue =
+      Printf.sprintf "%s:\n" (Symbol.name name) ::
       Printf.sprintf "\taddi, sp, sp, %d\n" (-space * wordsize) ::
       Printf.sprintf "\tsd, ra, %d(sp)\n" ((space - 1) * wordsize) ::
       Printf.sprintf "\tsd, s0, %d(sp)\n" ((space - 2) * wordsize) ::
       Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) :: []
-      |> create in
+    in
     let epilogue =
       Printf.sprintf "\tld, ra, %d(sp)\n" ((space - 1) * wordsize) ::
       Printf.sprintf "\tld, s0, %d(sp)\n" ((space - 2) * wordsize) ::
       Printf.sprintf "\taddi, s0, sp, %d\n" (space * wordsize) ::
       Printf.sprintf "\tjr ra\n" :: []
-      |> create in
-    { prolog = A.LABEL { assem = Printf.sprintf "%s:\n" (Symbol.name name); lab = name } :: prologue;
-      body = body; epilog = epilogue }
+    in
+    { prologue = prologue; body = body; epilogue = epilogue }
 
 end
 

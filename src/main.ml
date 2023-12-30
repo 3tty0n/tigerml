@@ -11,15 +11,13 @@ let codegen_frag frag =
     let stms = canonize body in
     let result = List.map (RiscVGen.codegen frame) stms
                  |> List.flatten in
-    let Frame.{ prolog; body; epilog } = Frame.procEntryExit3 (frame, result) in
-    if List.length body <> 0 then
-      let label = List.hd body in
-      (match label with Assem.LABEL _ -> () | _ -> ErrorMsg.impossible "body doesn't start LABEL");
-      label :: prolog @ (List.tl body) @ epilog
-      |> List.map (Assem.format Frame.string_of_register)
-    else
-      (prolog @ body @ epilog)
-      |> List.map (Assem.format Frame.string_of_register)
+    let instrs = Frame.procEntryExit2 (frame, result) in
+    prerr_endline "============= Assem ======================";
+    List.iter (fun instr -> prerr_endline (Assem.show_instr instr)) instrs;
+    let Frame.{ prologue; body; epilogue } = Frame.procEntryExit3 (frame, instrs) in
+    prologue @
+    List.map (Assem.format Frame.string_of_register) body @
+    epilogue
   | Frame.STRING (label, str) ->
     [Printf.sprintf "%s:\n\t.ascii \"%s\"\n"
        (Symbol.name label) str]

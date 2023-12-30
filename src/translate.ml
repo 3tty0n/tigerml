@@ -332,11 +332,7 @@ let seqExp exps =
       Ex (T.ESEQ (seq (List.map unNx rest), unEx last))
 
 let procEntryExit (exp, level) =
-  let body_with_return = T.MOVE (T.TEMP Frame.rv, unEx exp) in
-  let body_with_lable =
-    T.SEQ (T.LABEL (Frame.name level.frame), body_with_return)
-  in
-  let processed_body = Frame.procEntryExit1 (level.frame, body_with_lable) in
+  let processed_body = Frame.procEntryExit1 (level.frame, unNx exp) in
   let frag = Frame.PROC { frame = level.frame; body = processed_body } in
   frags := frag :: !frags;
   ()
