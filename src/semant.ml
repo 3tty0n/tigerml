@@ -522,9 +522,9 @@ and transDec venv tenv senv level dec =
       (* then, typecheck each individual function *)
       let typecheckFunc ({ name; params; body; pos; _ } : A.fundec) =
         let funcName = quote (S.name name) in
-        let resultTy =
+        let resultTy, level =
           match getValue venv' name pos with
-          | Env.FunEntry { result; _ } -> result
+          | Env.FunEntry { result; level; _ } -> result, level
           | _ ->
               ErrorMsg.impossible
                 (funcName
@@ -548,9 +548,16 @@ and transDec venv tenv senv level dec =
           error pos
             ("Function " ^ funcName ^ " should have result type " ^ resultTyStr
            ^ ", but its body has type " ^ bodyTyStr ^ ".")
-        else bodyExp
+        else
+          bodyExp, level
       in
-      let newBodyExps = List.map typecheckFunc lst in
+      let newBodyExps =
+        List.map (fun fundec ->
+            let newbodyexp, level = typecheckFunc fundec in
+            Translate.procEntryExit (newbodyexp, level);
+            newbodyexp
+          ) lst
+      in
       ({ venv = venv'; tenv; senv }, newBodyExps)
   | A.TypeDec lst ->
       (* create new type environment with name types *)
