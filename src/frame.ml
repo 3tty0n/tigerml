@@ -108,6 +108,7 @@ module RISCVFrame : FRAME = struct
 
   let exp a e =
     match a with
+    | InFrame 0 -> Tree.MEM (e)
     | InFrame k -> Tree.MEM (Tree.BINOP (Tree.PLUS, e, Tree.CONST k))
     | InReg r -> Tree.TEMP r
 
