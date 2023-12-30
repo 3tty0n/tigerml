@@ -192,27 +192,29 @@ module RISCVFrame : FRAME = struct
     let create_prolog formals =
       let decrement =
         A.OPER {
-          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (-space * 16);
+          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (-space * wordsize);
           src = [ sp ];
           dst = [];
           jump = None }
       in
-      let store_saved_regs =
-        List.mapi (fun i formal ->
+      let store_saved_regs, _, _ =
+        List.fold_left (fun (acc, i_frame, i_reg) formal ->
             match formal with
             | InFrame n ->
-              A.MOVE {
-                assem = Printf.sprintf "\tsd 's0, %d('d0)\n" n;
-                src = List.nth callee_save_regs (n / wordsize);
-                dst = sp
-              }
-            | InReg tmp ->
-              A.MOVE {
-                assem = Printf.sprintf "\tsd 's0, %d('d0)\n" (i * wordsize);
-                src = tmp;
-                dst = sp
-              }
-          ) formals
+              acc @ [
+                A.MOVE {
+                  assem = Printf.sprintf "\tsd 's0, %d('d0)\n" n;
+                  src = List.nth callee_save_regs (n / wordsize);
+                  dst = sp
+                }
+              ], i_frame + 1, i_reg
+            | InReg reg ->
+              acc @ [A.MOVE {
+                assem = Printf.sprintf "\tmv 's0, 'd0\n";
+                src = List.nth arg_regs i_reg;
+                dst = reg
+              }], i_frame, i_reg
+          ) ([], 0, 0) formals
       in
       decrement :: store_saved_regs @
       [ A.MOVE { assem = Printf.sprintf "\tsd 'd0, %d('s0)\n" ((space - 1) * wordsize);
@@ -220,18 +222,16 @@ module RISCVFrame : FRAME = struct
                  dst = ra } ] (* store ra *)
     in
     let create_epilog formals =
-      let back_saved_regs =
-        List.mapi (fun i formal ->
+      let back_saved_regs, _, _ =
+        List.fold_left (fun (acc, i_frame, i_reg) formal ->
             match formal with
             | InFrame n ->
-              A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" n;
+              acc @ [A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" n;
                        src = sp;
-                       dst = List.nth callee_save_regs (n / wordsize) }
+                       dst = List.nth callee_save_regs (n / wordsize) }], i_frame + 1, i_reg
             | InReg reg ->
-              A.MOVE { assem = "\tmv 'd0, 's0\n";
-                       src = List.nth callee_save_regs i;
-                       dst = reg }
-          ) formals
+              acc, i_frame, i_reg + 1
+          ) ([], 0, 0) formals
       in
       let reload_ra =
         A.MOVE { assem = Printf.sprintf "\tld 'd0, %d('s0)\n" ((List.length formals) * wordsize);
@@ -240,7 +240,7 @@ module RISCVFrame : FRAME = struct
       in
       let increment =
         A.OPER {
-          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (space * 16);
+          assem = Printf.sprintf "\taddi 's0, 's0, %d\n" (space * wordsize);
           src = [ sp ];
           dst = [];
           jump = None }
