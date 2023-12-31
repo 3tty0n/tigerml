@@ -266,10 +266,17 @@ module RiscVGen : CODEGEN = struct
             | T.NAME lab ->
               emit (
                 A.OPER {
-                  assem = Printf.sprintf "\tcall %s\n\tmv 'd0, 'd1\n" (Temp.string_of_label lab);
+                  assem = Printf.sprintf "\tcall %s\n" (Temp.string_of_label lab);
                   src = munch_args (0, args);
-                  dst = r :: Frame.rv :: calldefs;
+                  dst = calldefs;
                   jump = None
+                }
+              );
+              emit (
+                A.MOVE {
+                  assem = "\tmv 'd0, 's0\n";
+                  src = Frame.rv;
+                  dst = r;
                 }
               )
             | _ ->
