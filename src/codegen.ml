@@ -17,7 +17,7 @@ module RiscVGen : CODEGEN = struct
       t
     in
 
-    let calldefs = [ Frame.rv; Frame.rv ] @ Frame.caller_save_regs in
+    let calldefs = [ Frame.rv; Frame.ra ] @ Frame.callersaves in
 
     let rec munch_stm = function
       | T.SEQ (a, b) ->
@@ -281,7 +281,7 @@ module RiscVGen : CODEGEN = struct
     and munch_args (i, args) =
       match args with
       | arg :: rst ->
-        (match List.nth_opt Frame.arg_regs i with
+        (match List.nth_opt Frame.argregs i with
          | Some reg ->
            emit (
              A.MOVE
@@ -291,7 +291,7 @@ module RiscVGen : CODEGEN = struct
                });
            reg :: munch_args (i + 1, rst)
          | None ->
-           let offset = Frame.wordsize * (i - List.length Frame.arg_regs) in
+           let offset = Frame.wordsize * (i - List.length Frame.argregs) in
            (emit
               (A.OPER
                  { assem = Printf.sprintf "\tsd 's0, %d('d0)\n" offset;

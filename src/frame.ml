@@ -52,9 +52,10 @@ module type FRAME = sig
   type fn = { prologue : string list; body : Assem.instr list; epilogue : string list }
   val procEntryExit3 : frame * Assem.instr list -> fn
 
-  val arg_regs : Temp.temp list
-  val callee_save_regs : Temp.temp list
-  val caller_save_regs : Temp.temp list
+  val specialregs : Temp.temp list
+  val argregs : Temp.temp list
+  val calleesaves : Temp.temp list
+  val callersaves : Temp.temp list
   val string_of_register : Temp.temp -> string
 end
 
@@ -139,7 +140,7 @@ module RISCVFrame : FRAME = struct
         Temp.Table.enter m tmp reg_name) !temp_map lst;
     List.map snd lst
 
-  let special_regs =
+  let specialregs =
     process_registers [
       ("zero", zero);
       ("ra", ra);
@@ -149,7 +150,7 @@ module RISCVFrame : FRAME = struct
       ("a0", rv)
     ]
 
-  let arg_regs =
+  let argregs =
     process_registers [
       ("a1", Temp.newtemp ());
       ("a2", Temp.newtemp ());
@@ -160,7 +161,7 @@ module RISCVFrame : FRAME = struct
       ("a7", Temp.newtemp ());
     ]
 
-  let callee_save_regs =
+  let calleesaves =
     process_registers [
       ("s0", s0);
       ("s1", Temp.newtemp());
@@ -174,7 +175,7 @@ module RISCVFrame : FRAME = struct
       ("s9", Temp.newtemp ());
     ]
 
-  let caller_save_regs =
+  let callersaves =
     process_registers [
       ("t0", Temp.newtemp ());
       ("t1", Temp.newtemp ());
@@ -195,17 +196,17 @@ module RISCVFrame : FRAME = struct
     let open Tree in
     let { name; formals; locals } = frame in
     let set_param (stmt, n) access =
-      if n < 4 then
+      if n < 7 then
         match access with
         | InReg t ->
           SEQ (
-            MOVE (TEMP t, TEMP (List.nth arg_regs n)),
+            MOVE (TEMP t, TEMP (List.nth argregs n)),
             stmt
           ), n + 1
         | InFrame k ->
           SEQ (
             MOVE (MEM (BINOP (PLUS, TEMP fp, CONST k)),
-                  TEMP (List.nth arg_regs n)),
+                  TEMP (List.nth argregs n)),
             stmt
           ), n + 1
       else
@@ -241,7 +242,7 @@ module RISCVFrame : FRAME = struct
     body @ [
       Assem.OPER {
         assem = "";
-        src = [ ra; sp; fp ] @ callee_save_regs;
+        src = [ zero; ra; sp; fp ] @ calleesaves;
         dst = [];
         jump = Some []
       }
