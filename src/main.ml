@@ -44,7 +44,7 @@ let codegen filename =
       Frame.newFrame { name = Temp.namedlabel "main"; formals = [] }
   in
   List.fold_left (fun acc frag -> acc @ codegen_frag frag) [] frag
-  @ (codegen_exp frame exp)
+  @ (codegen_frag (Frame.PROC { body=(Translate.unNx exp); frame=frame }))
 
 let run filename =
   try
