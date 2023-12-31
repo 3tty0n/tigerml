@@ -196,7 +196,7 @@ module RISCVFrame : FRAME = struct
     let open Tree in
     let { name; formals; locals } = frame in
     let set_param (stmt, n) access =
-      if n < 7 then
+      if n < List.length argregs then
         match access with
         | InReg t ->
           SEQ (
@@ -260,18 +260,18 @@ module RISCVFrame : FRAME = struct
 
     let { name; formals; locals } = frame in
 
-    let space = List.length formals + !locals in (* number of s registers used *)
+    let space = (List.length formals + !locals) * wordsize + 16 in (* number of s registers used *)
     let prologue =
       Printf.sprintf "%s:\n" (Symbol.name name) ::
-      Printf.sprintf "\taddi sp, sp, %d\n" (-space * wordsize) ::
-      Printf.sprintf "\tsd ra, %d(sp)\n" ((space - 1) * wordsize) ::
-      Printf.sprintf "\tsd s0, %d(sp)\n" ((space - 2) * wordsize) ::
-      Printf.sprintf "\taddi s0, sp, %d\n" (space * wordsize) :: []
+      Printf.sprintf "\taddi sp, sp, %d\n" (-space) ::
+      Printf.sprintf "\tsd ra, %d(sp)\n" (space - wordsize) ::
+      Printf.sprintf "\tsd s0, %d(sp)\n" (space - 2 * wordsize) ::
+      Printf.sprintf "\taddi s0, sp, %d\n" space :: []
     in
     let epilogue =
-      Printf.sprintf "\tld ra, %d(sp)\n" ((space - 1) * wordsize) ::
-      Printf.sprintf "\tld s0, %d(sp)\n" ((space - 2) * wordsize) ::
-      Printf.sprintf "\taddi s0, sp, %d\n" (space * wordsize) ::
+      Printf.sprintf "\tld ra, %d(sp)\n" (space - wordsize) ::
+      Printf.sprintf "\tld s0, %d(sp)\n" (space - 2 * wordsize) ::
+      Printf.sprintf "\taddi s0, sp, %d\n" space ::
       Printf.sprintf "\tjr ra\n" :: []
     in
     { prologue = prologue; body = body; epilogue = epilogue }
